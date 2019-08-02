@@ -1,22 +1,29 @@
 # Cachyr
 
-A typesafe key-value data cache for iOS, macOS, tvOS and watchOS written in Swift.
+A typesafe key-value cache for iOS, iPadOS, macOS, tvOS and watchOS written in Swift.
 
-There already exists plenty of cache solutions, so why create one more? We had a few requirements where existing solutions fulfilled some of them but not all:
-
-- Written purely in Swift.
-- Type safety while still allowing any kind of data to be stored.
-- Disk and memory caching.
-- Clean, single-purpose implementation. Do caching and nothing else.
-
+- Thread safe.
+- Link caches with different key and value types.
+- Generic storage. Use the provided filesystem and memory storage, or write your own.
+- Clean, single-purpose implementation. Does caching and nothing else.
 
 ## Installation
+
+### Swift Package Manager
+
+TODO
 
 ### CocoaPods
 
 ```
 Add to Podfile:
-pod 'Cachyr'
+pod 'Cachyr', :git => 'https://github.com/nrkno/yr-cachyr.git'
+
+For a specific branch:
+pod 'Cachyr', :git => 'https://github.com/nrkno/yr-cachyr.git', :branch => 'master'
+
+For a specific tag, like a release:
+pod 'Cachyr', :git => 'https://github.com/nrkno/yr-cachyr.git', :tag => '2.0.0'
 
 Then:
 $ pod install
@@ -28,44 +35,72 @@ Clone the repo somewhere suitable, like inside your project repo so Cachyr can b
 
 Alternatively build the framework and add it to your project.
 
-
 ## Usage
 
+### Simple Memory Cache
+
 ```swift
-let cache = DataCache()
+let cache = Cache(storage: MemoryStorage<String, String>())
 let key = "foo"
 let text = "bar"
-cache.setValue(text, for: key)
-
-// ... do important things ...
-
-let cachedText: String? = cache.value(for: key)
+cache.setValue(text, forKey: key)
+let cachedText = cache.value(forKey: key)
 
 // Or asynchronously
-let cachedText = cache.value(for: key) { (value: String?) in
+let cachedText = cache.value(forKey: key) { (value) in
     // Do something with value
 }
 ```
 
-In this example the string `bar` is stored in the cache for the key `foo`. It is later retrieved as a string optional by explicitly declaring `String?` as the value type. Let's look at how generics enable easy data transformation.
+All caches are backed by some kind of storage. Storage for memory and the file system are included. Implement the `CacheStorage` protocol to provide custom storage.
+
+### Linking Caches
+
+Caches can be linked to provide cache layers. There is no automatic propagation of changes between caches with one exception; querying a cache for a value or attributes for a value will query the parent if not found (and their parent etc.), and the cache will be updated with the value from the parent if the parent can provide it. The keys and values do not have to be the same for the linked caches, you can provide transforms for both.
+
+Here is an example of a filesystem cache with a memory cache in front, where the keys and values are the same type:
 
 ```swift
-let textAsData = cache.value(for: key) { (value: Data?) in
-    print(value)
+struct Book: Codable {
+    let title: String
+}
+
+guard let diskStorage = FileSystemStorage<String, Book>() else { return }
+let diskCache = Cache(storage: diskStorage)
+let memoryCache = Cache(storage: MemoryStorage<String, Book>())
+memoryCache.setCache(diskCache, as: .parent,
+    keyTransformer: .identity(), valueTransformer: .identity())
+
+let book = Book(title: "Cachyr")
+diskCache.setValue(book, forKey: "cachyr")
+if let foundBook = memoryCache.value(forKey: "cachyr") {
+	// ...
 }
 ```
 
-Now the exact same key is used to retrieve the data representation of the value. The cache stores everything as data, and by implementing the `DataConvertable` protocol for a type it is possible to convert the cached data to the return type you define when retrieving a value.
+A more advanced example with key and value transforms:
 
-There are default `DataConvertable` implementations for `Data`, `String`, `Int` (all integer types), `Float` and `Double`.
+```swift
+guard let dataStorage = FileSystemStorage<Int, Data>() else { return }
+let dataCache = Cache(storage: dataStorage)
+let memoryCache = Cache(storage: MemoryStorage<String, Book>())
 
-For detailed usage examples take a look at [Usage.md](./Docs/Usage.md).
+let keyTransformer = Transformer<String, Int>(
+    transform: { Int($0) },
+    reverse: { "\($0)" })
 
-## ToDo
+let valueTransformer = Transformer<Book, Data>(
+    transform: { try? JSONEncoder().encode($0) },
+    reverse: { try? JSONDecoder().decode(Book.self, from: $0) })
 
-This framework is production ready but there are still many possible improvements. Some known tasks are:
+memoryCache.setCache(dataCache, as: .parent,
+    keyTransformer: keyTransformer, valueTransformer: valueTransformer)
 
-- Limit for disk usage. The disk cache has no limit on how much data it stores.
-- Default `DataConvertable` support more common types.
+let dataKey = 42
+let memoryKey = "42"
+let book = Book(title: "foo")
+let bookData = try! JSONEncoder().encode(book)
 
-Pull requests are very welcome.
+dataCache.setValue(bookData, forKey: dataKey)
+let fetchedBook = memoryCache.value(forKey: memoryKey)
+```

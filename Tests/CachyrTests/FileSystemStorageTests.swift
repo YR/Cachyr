@@ -1,7 +1,7 @@
 /**
  *  Cachyr
  *
- *  Copyright (c) 2016 NRK. Licensed under the MIT license, as follows:
+ *  Copyright (c) 2020 NRK. Licensed under the MIT license, as follows:
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -25,13 +25,13 @@
 import XCTest
 @testable import Cachyr
 
-class DiskCacheTests: XCTestCase {
-    var cache: DiskCache<String>!
+class FileSystemStorageTests: XCTestCase {
+    var cache: Cache<FileSystemStorage<String, String>>!
 
     override func setUp() {
         super.setUp()
 
-        cache = DiskCache<String>(name: "no.nrk.yr.cache-test")
+        cache = Cache(storage: FileSystemStorage<String, String>(name: "no.nrk.cachyr.test")!)
     }
 
     override func tearDown() {
@@ -40,8 +40,25 @@ class DiskCacheTests: XCTestCase {
         cache.removeAll()
     }
 
+    func testCodable() {
+        struct Thing: Codable, Equatable {
+            let identifier: Int
+            let question: String
+        }
+
+        let cache = Cache(storage: FileSystemStorage<Int, Thing>(name: "no.nrk.cachyr.test-codable")!)
+        defer { cache.removeAll() }
+
+        let key = 42
+        let thing = Thing(identifier: key, question: "foo")
+        cache.setValue(thing, forKey: key)
+        let value = cache.value(forKey: key)
+        XCTAssertNotNil(value)
+        XCTAssertEqual(thing, value)
+    }
+
     func testDataValue() {
-        let cache = DiskCache<Data>()!
+        let cache = Cache(storage: FileSystemStorage<String, Data>(name: "no.nrk.cachyr.test-data")!)
         defer { cache.removeAll() }
 
         let foo = "bar".data(using: .utf8)!
@@ -71,7 +88,7 @@ class DiskCacheTests: XCTestCase {
         cache.setValue(key, forKey: key)
         var value = cache.value(forKey: key)
         XCTAssertNotNil(value)
-        cache.removeValue(forKey: key)
+        cache.setValue(nil, forKey: key)
         value = cache.value(forKey: key)
         XCTAssertNil(value)
     }
@@ -86,15 +103,6 @@ class DiskCacheTests: XCTestCase {
         XCTAssertNil(bar)
     }
 
-    func testFileCreation() {
-        let key = "/foo:b/ar\\"
-        cache.setValue(key, forKey: key)
-        let fileURL = cache.fileURL(forKey: key)
-        XCTAssertNotNil(fileURL)
-        let exists = FileManager.default.fileExists(atPath: fileURL!.path)
-        XCTAssertTrue(exists)
-    }
-
     func testExpiration() {
         let foo = "foo"
 
@@ -103,12 +111,12 @@ class DiskCacheTests: XCTestCase {
         XCTAssertNotNil(expirationInFutureValue)
 
         let hasNotExpiredDate = Date(timeIntervalSinceNow: 30)
-        cache.setValue(foo, forKey: foo, expires: hasNotExpiredDate)
+        cache.setValue(foo, forKey: foo, attributes: CacheItemAttributes(expiration: hasNotExpiredDate))
         let notExpiredValue = cache.value(forKey: foo)
         XCTAssertNotNil(notExpiredValue)
 
         let hasExpiredDate = Date(timeIntervalSinceNow: -30)
-        cache.setValue(foo, forKey: foo, expires: hasExpiredDate)
+        cache.setValue(foo, forKey: foo, attributes: CacheItemAttributes(expiration: hasExpiredDate))
         let expiredValue = cache.value(forKey: foo)
         XCTAssertNil(expiredValue)
     }
@@ -119,8 +127,8 @@ class DiskCacheTests: XCTestCase {
         let barExpireDate = Date(timeIntervalSinceNow: -30)
 
         cache.setValue(foo, forKey: foo)
-        cache.setValue(bar, forKey: bar, expires: barExpireDate)
-        cache.removeExpired()
+        cache.setValue(bar, forKey: bar, attributes: CacheItemAttributes(expiration: barExpireDate))
+        cache.remove(where: { $0.hasExpired })
 
         let fooValue = cache.value(forKey: foo)
         XCTAssertNotNil(fooValue)
@@ -134,10 +142,10 @@ class DiskCacheTests: XCTestCase {
         let expires = Date(timeIntervalSince1970: fullExpiration.timeIntervalSince1970.rounded())
         let foo = "foo"
         cache.setValue(foo, forKey: foo)
-        let noExpire = cache.expirationDate(forKey: foo)
+        let noExpire = cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNil(noExpire)
-        cache.setExpirationDate(expires, forKey: foo)
-        let expire = cache.expirationDate(forKey: foo)
+        cache.setAttributes(CacheItemAttributes(expiration: expires), forKey: foo)
+        let expire = cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNotNil(expire)
         XCTAssertEqual(expires, expire)
     }
@@ -146,191 +154,134 @@ class DiskCacheTests: XCTestCase {
         let expiration = Date().addingTimeInterval(10)
         let foo = "foo"
         cache.setValue(foo, forKey: foo)
-        let noExpire = cache.expirationDate(forKey: foo)
+        let noExpire = cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNil(noExpire)
-        cache.setExpirationDate(expiration, forKey: foo)
-        let expire = cache.expirationDate(forKey: foo)
+        cache.setAttributes(CacheItemAttributes(expiration: expiration), forKey: foo)
+        let expire = cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNotNil(expire)
-        cache.setExpirationDate(nil, forKey: foo)
-        let expirationGone = cache.expirationDate(forKey: foo)
-        XCTAssertNil(expirationGone)
-    }
-
-    func testRemoveItemsOlderThan() {
-        let foo = "foo"
-        cache.setValue(foo, forKey: foo)
-
-        cache.removeItems(olderThan: Date(timeIntervalSinceNow: -30))
-        XCTAssertNotNil(cache.value(forKey: foo) as String?)
-
-        cache.removeItems(olderThan: Date())
-        XCTAssertNil(cache.value(forKey: foo) as String?)
-    }
-
-    func testStorageSize() {
-        let data = "123456789"
-        let dataSize = data.utf8.count
-        cache.setValue(data, forKey: "data")
-        let size = cache.storageSize
-        XCTAssertEqual(dataSize, size)
+        cache.setAttributes(CacheItemAttributes(), forKey: foo)
+        let expirationGone = cache.attributes(forKey: foo)
+        XCTAssertNotNil(expirationGone)
+        XCTAssertNil(expirationGone?.expirationDate)
     }
 
     func testInteger() {
-        let cacheInt = DiskCache<Int>()!
+        let cacheInt = Cache(storage: FileSystemStorage<String, Int>(name: "no.nrk.cachyr.test-int")!)
         defer { cacheInt.removeAll() }
         let int = Int(Int.min)
         cacheInt.setValue(int, forKey: "Int")
         let intValue = cacheInt.value(forKey: "Int")
-        XCTAssertNotNil(intValue)
-        XCTAssertEqual(intValue!, int)
+        XCTAssertEqual(intValue, int)
 
-        let cacheInt8 = DiskCache<Int8>()!
+        let cacheInt8 = Cache(storage: FileSystemStorage<String, Int8>(name: "no.nrk.cachyr.test-int8")!)
         defer { cacheInt8.removeAll() }
         let int8 = Int8(Int8.min)
         cacheInt8.setValue(int8, forKey: "Int8")
         let int8Value = cacheInt8.value(forKey: "Int8")
-        XCTAssertNotNil(int8Value)
-        XCTAssertEqual(int8Value!, int8)
+        XCTAssertEqual(int8Value, int8)
 
-        let cacheInt16 = DiskCache<Int16>()!
+        let cacheInt16 = Cache(storage: FileSystemStorage<String, Int16>(name: "no.nrk.cachyr.test-int16")!)
         defer { cacheInt16.removeAll() }
         let int16 = Int16(Int16.min)
         cacheInt16.setValue(int16, forKey: "Int16")
         let int16Value = cacheInt16.value(forKey: "Int16")
-        XCTAssertNotNil(int16Value)
-        XCTAssertEqual(int16Value!, int16)
+        XCTAssertEqual(int16Value, int16)
 
-        let cacheInt32 = DiskCache<Int32>()!
+        let cacheInt32 = Cache(storage: FileSystemStorage<String, Int32>(name: "no.nrk.cachyr.test-int32")!)
         defer { cacheInt32.removeAll() }
         let int32 = Int32(Int32.min)
         cacheInt32.setValue(int32, forKey: "Int32")
         let int32Value = cacheInt32.value(forKey: "Int32")
-        XCTAssertNotNil(int32Value)
-        XCTAssertEqual(int32Value!, int32)
+        XCTAssertEqual(int32Value, int32)
 
-        let cacheInt64 = DiskCache<Int64>()!
+        let cacheInt64 = Cache(storage: FileSystemStorage<String, Int64>(name: "no.nrk.cachyr.test-int64")!)
         defer { cacheInt64.removeAll() }
         let int64 = Int64(Int64.min)
         cacheInt64.setValue(int64, forKey: "Int64")
         let int64Value = cacheInt64.value(forKey: "Int64")
-        XCTAssertNotNil(int64Value)
-        XCTAssertEqual(int64Value!, int64)
+        XCTAssertEqual(int64Value, int64)
 
-        let cacheUInt = DiskCache<UInt>()!
+        let cacheUInt = Cache(storage: FileSystemStorage<String, UInt>(name: "no.nrk.cachyr.test-uint")!)
         defer { cacheUInt.removeAll() }
         let uint = UInt(UInt.max)
         cacheUInt.setValue(uint, forKey: "UInt")
         let uintValue = cacheUInt.value(forKey: "UInt")
-        XCTAssertNotNil(uintValue)
-        XCTAssertEqual(uintValue!, uint)
+        XCTAssertEqual(uintValue, uint)
 
-        let cacheUInt8 = DiskCache<UInt8>()!
+        let cacheUInt8 = Cache(storage: FileSystemStorage<String, UInt8>(name: "no.nrk.cachyr.test-uint8")!)
         defer { cacheUInt8.removeAll() }
         let uint8 = UInt8(UInt8.max)
         cacheUInt8.setValue(uint8, forKey: "UInt8")
         let uint8Value = cacheUInt8.value(forKey: "UInt8")
-        XCTAssertNotNil(uint8Value)
-        XCTAssertEqual(uint8Value!, uint8)
+        XCTAssertEqual(uint8Value, uint8)
 
-        let cacheUInt16 = DiskCache<UInt16>()!
+        let cacheUInt16 = Cache(storage: FileSystemStorage<String, UInt16>(name: "no.nrk.cachyr.test-uint16")!)
         defer { cacheUInt16.removeAll() }
         let uint16 = UInt16(UInt16.max)
         cacheUInt16.setValue(uint16, forKey: "UInt16")
         let uint16Value = cacheUInt16.value(forKey: "UInt16")
-        XCTAssertNotNil(uint16Value)
-        XCTAssertEqual(uint16Value!, uint16)
+        XCTAssertEqual(uint16Value, uint16)
 
-        let cacheUInt32 = DiskCache<UInt32>()!
+        let cacheUInt32 = Cache(storage: FileSystemStorage<String, UInt32>(name: "no.nrk.cachyr.test-uint32")!)
         defer { cacheUInt32.removeAll() }
         let uint32 = UInt32(UInt32.max)
         cacheUInt32.setValue(uint32, forKey: "UInt32")
         let uint32Value = cacheUInt32.value(forKey: "UInt32")
-        XCTAssertNotNil(uint32Value)
-        XCTAssertEqual(uint32Value!, uint32)
+        XCTAssertEqual(uint32Value, uint32)
 
-        let cacheUInt64 = DiskCache<UInt64>()!
+        let cacheUInt64 = Cache(storage: FileSystemStorage<String, UInt64>(name: "no.nrk.cachyr.test-uint64")!)
         defer { cacheUInt64.removeAll() }
         let uint64 = UInt64(UInt64.max)
         cacheUInt64.setValue(uint64, forKey: "UInt64")
         let uint64Value = cacheUInt64.value(forKey: "UInt64")
-        XCTAssertNotNil(uint64Value)
-        XCTAssertEqual(uint64Value!, uint64)
+        XCTAssertEqual(uint64Value, uint64)
     }
 
     func testFloatingPoint() {
-        let cacheFloat = DiskCache<Float>()!
+        let cacheFloat = Cache(storage: FileSystemStorage<String, Float>(name: "no.nrk.cachyr.test-float")!)
         defer { cacheFloat.removeAll() }
 
         let float = Float(Float.pi)
         cacheFloat.setValue(float, forKey: "Float")
         let floatValue = cacheFloat.value(forKey: "Float")
-        XCTAssertNotNil(floatValue)
-        XCTAssertEqual(floatValue!, float)
+        XCTAssertEqual(floatValue, float)
 
         let negFloat = Float(-Float.pi)
         cacheFloat.setValue(negFloat, forKey: "negFloat")
         let negFloatValue = cacheFloat.value(forKey: "negFloat")
-        XCTAssertNotNil(negFloatValue)
-        XCTAssertEqual(negFloatValue!, negFloat)
+        XCTAssertEqual(negFloatValue, negFloat)
 
         let infFloat = Float.infinity
         cacheFloat.setValue(infFloat, forKey: "infFloat")
         let infFloatValue = cacheFloat.value(forKey: "infFloat")
-        XCTAssertNotNil(infFloatValue)
-        XCTAssertEqual(infFloatValue!, infFloat)
+        XCTAssertEqual(infFloatValue, infFloat)
 
         let nanFloat = Float.nan
         cacheFloat.setValue(nanFloat, forKey: "nanFloat")
         let nanFloatValue = cacheFloat.value(forKey: "nanFloat")
-        XCTAssertNotNil(nanFloatValue)
-        XCTAssertEqual(nanFloatValue!.isNaN, nanFloat.isNaN)
+        XCTAssertEqual(nanFloatValue?.isNaN, nanFloat.isNaN)
 
-        let cacheDouble = DiskCache<Double>()!
+        let cacheDouble = Cache(storage: FileSystemStorage<String, Double>(name: "no.nrk.cachyr.test-double")!)
         defer { cacheDouble.removeAll() }
 
         let double = Double(Double.pi)
         cacheDouble.setValue(double, forKey: "Double")
         let doubleValue = cacheDouble.value(forKey: "Double")
-        XCTAssertNotNil(doubleValue)
-        XCTAssertEqual(doubleValue!, double)
+        XCTAssertEqual(doubleValue, double)
 
         let negDouble = Double(-Double.pi)
         cacheDouble.setValue(negDouble, forKey: "negDouble")
         let negDoubleValue = cacheDouble.value(forKey: "negDouble")
-        XCTAssertNotNil(negDoubleValue)
-        XCTAssertEqual(negDoubleValue!, negDouble)
+        XCTAssertEqual(negDoubleValue, negDouble)
 
         let infDouble = Double.infinity
         cacheDouble.setValue(infDouble, forKey: "infDouble")
         let infDoubleValue = cacheDouble.value(forKey: "infDouble")
-        XCTAssertNotNil(infDoubleValue)
-        XCTAssertEqual(infDoubleValue!, infDouble)
+        XCTAssertEqual(infDoubleValue, infDouble)
 
         let nanDouble = Double.nan
         cacheDouble.setValue(nanDouble, forKey: "nanDouble")
         let nanDoubleValue = cacheDouble.value(forKey: "nanDouble")
-        XCTAssertNotNil(nanDoubleValue)
-        XCTAssertEqual(nanDoubleValue!.isNaN, nanDouble.isNaN)
+        XCTAssertEqual(nanDoubleValue?.isNaN, nanDouble.isNaN)
     }
 }
-
-#if os(Linux)
-    extension DiskCacheTests {
-        static var allTests : [(String, (DiskCacheTests) -> () throws -> Void)] {
-            return [
-                ("testDataValue", testDataValue),
-                ("testStringValue", testStringValue),
-                ("testRemove", testRemove),
-                ("testRemoveAll", testRemoveAll),
-                ("testKeyEncode", testKeyEncode),
-                ("testFileCreation", testFileCreation),
-                ("testExpiration", testExpiration),
-                ("testRemoveExpired", testRemoveExpired),
-                ("testExpirationInterval", testExpirationInterval),
-                ("testRemoveItemsOlderThan", testRemoveItemsOlderThan),
-                ("testInteger", testInteger),
-                ("testFloatingPoint", testFloatingPoint),
-            ]
-        }
-    }
-#endif

@@ -1,7 +1,7 @@
 /**
  *  Cachyr
  *
- *  Copyright (c) 2016 NRK. Licensed under the MIT license, as follows:
+ *  Copyright (c) 2020 NRK. Licensed under the MIT license, as follows:
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,13 @@
 
 import Foundation
 
-open class DiskCache<ValueType: DataConvertable> {
+public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: CacheStorage {
+
+    private struct FileAttributes: Codable {
+        let name: String
+        var attributes: CacheItemAttributes
+    }
+
     /**
      Name of cache. Must be unique to separate different caches.
      Reverse domain notation, like no.nrk.yr.cache, is a good choice.
@@ -35,22 +41,12 @@ open class DiskCache<ValueType: DataConvertable> {
      Queue used to synchronize disk cache access. The cache allows concurrent reads
      but only serial writes using barriers.
      */
-    private let accessQueue: DispatchQueue
-
-    /**
-     Name of extended attribute that stores expire date (DEPRECATED).
-     */
-    private let expireDateAttributeName = "no.nrk.yr.cachyr.expireDate"
-
-    /**
-     Name of the extended attribute that holds the key (DEPRECATED).
-     */
-    private let keyAttributeName = "no.nrk.yr.cachyr.key"
+    private let queue: DispatchQueue
 
     /**
      Metadata and storage name for keys.
      */
-    private var storageKeyMap = [String: CacheItem]()
+    private var storageKeyMap = [Key: FileAttributes]()
 
     /**
      Storage for the url property.
@@ -79,7 +75,7 @@ open class DiskCache<ValueType: DataConvertable> {
      The number of bytes used by the contents of the cache.
      */
     public var storageSize: Int {
-        return accessQueue.sync {
+        return queue.sync {
             guard let url = self.url else {
                 return 0
             }
@@ -102,7 +98,19 @@ open class DiskCache<ValueType: DataConvertable> {
         }
     }
 
-    public init?(name: String = "no.nrk.yr.cache.disk", baseURL: URL? = nil) {
+    private let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        return decoder
+    }()
+
+    private let jsonEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        return encoder
+    }()
+
+    public init?(name: String = "no.nrk.cachyr.FileSystemStorage", baseURL: URL? = nil) {
         self.name = name
 
         let fm = FileManager.default
@@ -120,7 +128,7 @@ open class DiskCache<ValueType: DataConvertable> {
         }
 
         do {
-            let appSupportName = "no.nrk.yr.cachyr"
+            let appSupportName = "no.nrk.cachyr"
             let appSupportURL = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let appURL = appSupportURL.appendingPathComponent(appSupportName, isDirectory: true)
             try fm.createDirectory(at: appURL, withIntermediateDirectories: true)
@@ -130,13 +138,16 @@ open class DiskCache<ValueType: DataConvertable> {
             return nil
         }
 
-        accessQueue = DispatchQueue(label: "\(name).queue", attributes: .concurrent)
+        self.queue = DispatchQueue(label: "\(name).queue", attributes: .concurrent)
 
         // Ensure URL path exists or can be created
         guard let _ = self.url else {
+            CacheLog.error("Unable to access \(_url.absoluteString)")
             return nil
         }
 
+        CacheLog.info("Using storage at \(_url.absoluteString)")
+        CacheLog.info("Using DB at \(dbFileURL.absoluteString)")
         loadStorageKeyMap()
     }
 
@@ -144,128 +155,108 @@ open class DiskCache<ValueType: DataConvertable> {
         saveDB()
     }
 
-    public func contains(key: String) -> Bool {
-        return accessQueue.sync {
-            return _contains(key: key)
+    public var allKeys: AnySequence<Key> {
+        return queue.sync {
+            return AnySequence(storageKeyMap.keys)
         }
     }
 
-    private func _contains(key: String) -> Bool {
-        guard let url = fileURL(forKey: key) else {
-            return false
+    public var allAttributes: AnySequence<(Key, CacheItemAttributes)> {
+        return queue.sync {
+            return AnySequence(storageKeyMap.map { ($0.key, $0.value.attributes) })
         }
-        return FileManager.default.fileExists(atPath: url.path)
     }
 
-    public func value(forKey key: String) -> ValueType? {
-        return accessQueue.sync {
-            guard let data = data(for: key) else {
+    public func value(forKey key: Key) -> Value? {
+        return queue.sync {
+            guard let data = self.data(for: key) else {
+                CacheLog.verbose("No data found for key '\(key)'")
                 return nil
             }
 
-            if let value = ValueType.value(from: data) {
-                return value
-            } else {
-                CacheLog.warning("Could not convert data to \(ValueType.self)")
+            if Value.self == Data.self {
+                CacheLog.verbose("Found data for key '\(key)'")
+                return data as? Value
+            }
+
+            do {
+                let wrapper = try jsonDecoder.decode([Value].self, from: data)
+                if let wrappedValue = wrapper.first {
+                    CacheLog.verbose("Found wrapped value for key '\(key)'")
+                    return wrappedValue
+                } else {
+                    CacheLog.error("Wrapped value missing")
+                    return nil
+                }
+            } catch {
+                CacheLog.error(error)
                 return nil
             }
         }
     }
 
-    public func setValue(_ value: ValueType, forKey key: String, expires: Date? = nil) {
-        accessQueue.sync(flags: .barrier) {
-            guard let data = ValueType.data(from: value) else {
-                CacheLog.warning("Could not convert \(value) to Data")
+    public func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?) {
+        queue.sync(flags: .barrier) {
+            guard let value = value else {
+                CacheLog.verbose("Removing value for key '\(key)'")
+                removeFile(for: key)
                 return
             }
-            addFile(for: key, data: data, expires: expires)
+
+            let data: Data
+            if let alreadyData = value as? Data {
+                data = alreadyData
+            } else {
+                // JSONEncoder and PropertyListEncoder do not currently support top-level fragments
+                // which means values like a plain Int cannot be encoded, so wrap all non-data
+                // values in an array.
+                do {
+                    data = try jsonEncoder.encode([value])
+                } catch {
+                    CacheLog.error(error)
+                    return
+                }
+            }
+            let attributes = attributes ?? CacheItemAttributes()
+            CacheLog.verbose("Setting value for key '\(key)' with attributes: \(attributes)")
+            addFile(for: key, data: data, attributes: attributes)
         }
     }
 
-    public func removeValue(forKey key: String) {
-        accessQueue.sync(flags: .barrier) {
-            removeFile(for: key)
+    public func attributes(forKey key: Key) -> CacheItemAttributes? {
+        return queue.sync {
+            return storageKeyMap[key]?.attributes
+        }
+    }
+
+    public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) {
+        queue.sync(flags: .barrier) {
+            storageKeyMap[key]?.attributes = attributes
+            saveDBAfterInterval()
         }
     }
 
     public func removeAll() {
-        accessQueue.sync(flags: .barrier) {
-            _removeAll()
-        }
-    }
-
-    private func _removeAll() {
-        storageKeyMap.removeAll()
-        saveDB()
-        guard let cacheURL = self.url else {
-            return
-        }
-        do {
-            try FileManager.default.removeItem(at: cacheURL)
-        }
-        catch let error {
-            CacheLog.error(error.localizedDescription)
-        }
-    }
-
-    public func removeExpired() {
-        accessQueue.sync(flags: .barrier) {
-            removeExpiredItems()
-        }
-    }
-
-    private func removeExpiredItems() {
-        storageKeyMap.values
-            .filter { $0.hasExpired }
-            .forEach { removeFile(for: $0.key) }
-    }
-
-    public func expirationDate(forKey key: String) -> Date? {
-        return accessQueue.sync {
-            return _expirationDate(for: key)
-        }
-    }
-
-    private func _expirationDate(for key: String) -> Date? {
-        return storageKeyMap[key]?.expirationDate
-    }
-
-    public func setExpirationDate(_ date: Date?, forKey key: String) {
-        accessQueue.sync(flags: .barrier) {
-            _setExpirationDate(date, forKey: key)
-        }
-    }
-
-    private func _setExpirationDate(_ date: Date?, forKey key: String) {
-        storageKeyMap[key]?.expirationDate = date
-        saveDBAfterInterval()
-    }
-
-    public func removeItems(olderThan date: Date) {
-        accessQueue.sync(flags: .barrier) {
-            _removeItems(olderThan: date)
-        }
-    }
-
-    private func _removeItems(olderThan date: Date) {
-        for item in storageKeyMap.values {
-            guard
-                let fileURL = fileURL(forKey: item.key),
-                let resourceValues = try? fileURL.resourceValues(forKeys: [.creationDateKey]),
-                let created = resourceValues.creationDate,
-                created <= date
-            else {
-                continue
+        queue.sync(flags: .barrier) {
+            storageKeyMap.removeAll()
+            saveDB()
+            guard let cacheURL = self.url else {
+                return
             }
-            removeFile(for: item.key)
+            do {
+                try FileManager.default.removeItem(at: cacheURL)
+            }
+            catch let error {
+                CacheLog.error(error.localizedDescription)
+            }
         }
     }
 
-    func fileURL(forItem item: CacheItem) -> URL? {
-        return fileURL(forName: item.uuid.uuidString)
+    private func fileURL(forItem item: FileAttributes) -> URL? {
+        return fileURL(forName: item.name)
     }
 
-    func fileURL(forKey key: String) -> URL? {
+    func fileURL(forKey key: Key) -> URL? {
         guard let item = storageKeyMap[key] else { return nil }
         return fileURL(forItem: item)
     }
@@ -275,7 +266,7 @@ open class DiskCache<ValueType: DataConvertable> {
         return url.appendingPathComponent(name, isDirectory: false)
     }
 
-    private func data(for key: String) -> Data? {
+    private func data(for key: Key) -> Data? {
         guard
             let item = storageKeyMap[key],
             let fileURL = fileURL(forItem: item)
@@ -283,8 +274,12 @@ open class DiskCache<ValueType: DataConvertable> {
             return nil
         }
 
-        if item.hasExpired {
-            accessQueue.async(flags: .barrier) {
+        if item.attributes.shouldBeRemoved {
+            queue.async(flags: .barrier) {
+                // Check for item update while removal was scheduled
+                guard let item = self.storageKeyMap[key], item.attributes.shouldBeRemoved else {
+                    return
+                }
                 self.removeFile(for: key)
             }
             return nil
@@ -308,14 +303,14 @@ open class DiskCache<ValueType: DataConvertable> {
         }
     }
 
-    private func addFile(for key: String, data: Data, expires: Date? = nil) {
-        let cacheItem: CacheItem
+    private func addFile(for key: Key, data: Data, attributes: CacheItemAttributes) {
+        let cacheItem: FileAttributes
 
         if let existingItem = storageKeyMap[key] {
             cacheItem = existingItem
-            storageKeyMap[key]!.expirationDate = expires
+            storageKeyMap[key]!.attributes = attributes
         } else {
-            cacheItem = CacheItem(key: key, uuid: UUID(), expirationDate: expires)
+            cacheItem = FileAttributes(name: UUID().uuidString, attributes: attributes)
             storageKeyMap[key] = cacheItem
         }
 
@@ -333,7 +328,7 @@ open class DiskCache<ValueType: DataConvertable> {
         saveDBAfterInterval()
     }
 
-    private func removeFile(for key: String) {
+    private func removeFile(for key: Key) {
         if let fileURL = fileURL(forKey: key) {
             removeFile(at: fileURL)
         }
@@ -351,63 +346,10 @@ open class DiskCache<ValueType: DataConvertable> {
     }
 
     /**
-     Check expiration date extended attribute of file (DEPRECATED).
-     */
-    private func xattrExpirationForFile(_ url: URL) -> Date? {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return nil
-        }
-
-        do {
-            let data = try FileManager.default.extendedAttribute(expireDateAttributeName, on: url)
-            guard let epoch = Double.value(from: data) else {
-                CacheLog.error("Unable to convert extended attribute data to expire date.")
-                return nil
-            }
-            let date = Date(timeIntervalSince1970: epoch)
-            return date
-        } catch let error as ExtendedAttributeError {
-            // Missing expiration attribute is not an error
-            if error.code != ENOATTR {
-                CacheLog.error("\(error.name) \(error.code) \(error.description)")
-            }
-        } catch {
-            CacheLog.error("Error getting expire date extended attribute on \(url.path)")
-        }
-
-        return nil
-    }
-
-    /**
-     Get key from extended attribute of file (DEPRECATED).
-     */
-    private func xattrKeyForFile(_ url: URL) -> String? {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else {
-            return nil
-        }
-
-        var key: String?
-        do {
-            let data = try fm.extendedAttribute(keyAttributeName, on: url)
-            key = String(data: data, encoding: .utf8)
-            if key == nil {
-                CacheLog.error("Unable to decode key from data for extended attribute '\(keyAttributeName)'")
-            }
-        } catch {
-            CacheLog.error("Extended attribute '\(keyAttributeName)' not found on \(url.absoluteString)\n\(error)")
-        }
-
-        return key
-    }
-
-    /**
      Reset storage key map and load all keys from files in cache.
      */
     private func loadStorageKeyMap() {
         loadDB()
-
-        migrateXattrFiles()
 
         validateDB()
 
@@ -421,10 +363,12 @@ open class DiskCache<ValueType: DataConvertable> {
         }
         let decoder = JSONDecoder()
         do {
-            storageKeyMap = try decoder.decode([String: CacheItem].self, from: data)
+            storageKeyMap = try decoder.decode([Key: FileAttributes].self, from: data)
         } catch {
             CacheLog.error(error)
+            return
         }
+        CacheLog.info("DB loaded")
     }
 
     private var lastDBSaveDate = Date(timeIntervalSince1970: 0)
@@ -442,6 +386,7 @@ open class DiskCache<ValueType: DataConvertable> {
             var resourceValues = URLResourceValues()
             resourceValues.isExcludedFromBackup = true
             try dbFileURL.setResourceValues(resourceValues)
+            CacheLog.verbose("DB saved")
         } catch {
             CacheLog.error(error)
             return
@@ -455,7 +400,7 @@ open class DiskCache<ValueType: DataConvertable> {
     private func saveDBAfterInterval(_ interval: TimeInterval = 2.0) {
         let triggerDate = Date()
         lastDBSaveTriggeredDate = triggerDate
-        accessQueue.asyncAfter(deadline: .now() + interval, flags: .barrier) {
+        queue.asyncAfter(deadline: .now() + interval, flags: .barrier) {
             let latestDate = self.lastDBSaveDate.addingTimeInterval(self.maxDBSaveInterval)
             let now = Date()
             if now >= latestDate || self.lastDBSaveTriggeredDate == triggerDate {
@@ -468,13 +413,14 @@ open class DiskCache<ValueType: DataConvertable> {
         let fm = FileManager.default
 
         // Make sure each item has a corresponding file
-        for item in storageKeyMap.values {
+        for (key, item) in storageKeyMap {
             guard
-                !item.hasExpired,
+                !item.attributes.shouldBeRemoved,
                 let fileURL = fileURL(forItem: item),
                 fm.fileExists(atPath: fileURL.path)
             else {
-                removeFile(for: item.key)
+                CacheLog.info("No file found, removing '\(key)' from DB")
+                removeFile(for: key)
                 continue
             }
         }
@@ -483,39 +429,13 @@ open class DiskCache<ValueType: DataConvertable> {
         let items = storageKeyMap.values
         for fileURL in filesInCache() {
             let fileName = fileURL.lastPathComponent
-            if items.contains(where: { $0.uuid.uuidString == fileName }) {
+            if items.contains(where: { $0.name == fileName }) {
                 continue
             }
+            CacheLog.info("No item found, removing \(fileURL.absoluteString)")
             try? fm.removeItem(at: fileURL)
         }
-    }
 
-    private func migrateXattrFiles() {
-        for fileURL in filesInCache() {
-            guard let xattrKey = xattrKeyForFile(fileURL) else {
-                continue
-            }
-
-            let expiration = xattrExpirationForFile(fileURL)
-            let item = CacheItem(key: xattrKey, uuid: UUID(), expirationDate: expiration)
-            let fm = FileManager.default
-
-            guard let destinationURL = self.fileURL(forItem: item) else {
-                try? fm.removeItem(at: fileURL)
-                continue
-            }
-
-            do {
-                try fm.removeExtendedAttribute(keyAttributeName, from: fileURL)
-                try fm.removeExtendedAttribute(expireDateAttributeName, from: fileURL)
-                try fm.moveItem(at: fileURL, to: destinationURL)
-            } catch {
-                CacheLog.error(error)
-                try? fm.removeItem(at: fileURL)
-                continue
-            }
-
-            storageKeyMap[xattrKey] = item
-        }
+        CacheLog.info("DB validated")
     }
 }

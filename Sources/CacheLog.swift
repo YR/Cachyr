@@ -1,7 +1,7 @@
 /**
  *  Cachyr
  *
- *  Copyright (c) 2016 NRK. Licensed under the MIT license, as follows:
+ *  Copyright (c) 2020 NRK. Licensed under the MIT license, as follows:
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal

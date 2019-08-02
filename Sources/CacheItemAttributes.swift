@@ -1,7 +1,7 @@
 /**
  *  Cachyr
  *
- *  Copyright (c) 2016 NRK. Licensed under the MIT license, as follows:
+ *  Copyright (c) 2020 NRK. Licensed under the MIT license, as follows:
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,28 @@
 
 import Foundation
 
-public struct CacheItem: Codable {
-    public let key: String
-    public let uuid: UUID
+/**
+ Metadata for stored cache items.
+ */
+public struct CacheItemAttributes: Codable {
     public var expirationDate: Date?
+    public var removalDate: Date?
 
     public var hasExpired: Bool {
         guard let expiration = expirationDate else { return false }
         return Date() >= expiration
+    }
+
+    public var shouldBeRemoved: Bool {
+        guard let removal = removalDate else { return hasExpired }
+        return Date() >= removal
+    }
+
+    public init(
+        expiration: Date? = nil,
+        removal: Date? = nil
+    ) {
+        self.expirationDate = expiration
+        self.removalDate = removal
     }
 }
