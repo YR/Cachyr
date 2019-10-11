@@ -1,4 +1,4 @@
-// swift-tools-version:3.0
+// swift-tools-version:5.0
 import PackageDescription
 
 let package = Package(
@@ -23,5 +23,5 @@ let package = Package(
             name: "CachyrTests",
             dependencies: ["Cachyr"]),
     ],
-    swiftLanguageVersions: [.v3, .v4, .v5]
+    swiftLanguageVersions: [.v5]
 )
