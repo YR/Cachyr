@@ -18,7 +18,8 @@ let package = Package(
     targets: [
         .target(
             name: "Cachyr",
-            dependencies: []),
+            dependencies: [],
+            path: "Sources"),
         .testTarget(
             name: "CachyrTests",
             dependencies: ["Cachyr"]),
