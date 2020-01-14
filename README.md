@@ -11,7 +11,7 @@ A typesafe key-value cache for iOS, iPadOS, macOS, tvOS and watchOS written in S
 
 ### Swift Package Manager
 
-TODO
+Add to project in Xcode. In the file navigator select your project and then the "Swift Packages" tab. Press the "+" button and add the project url.
 
 ### CocoaPods
 
