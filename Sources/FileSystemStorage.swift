@@ -38,12 +38,6 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
     public let name: String
 
     /**
-     Queue used to synchronize disk cache access. The cache allows concurrent reads
-     but only serial writes using barriers.
-     */
-    private let queue: DispatchQueue
-
-    /**
      Metadata and storage name for keys.
      */
     private var storageKeyMap = [Key: FileAttributes]()
@@ -75,27 +69,25 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
      The number of bytes used by the contents of the cache.
      */
     public var storageSize: Int {
-        return queue.sync {
-            guard let url = self.url else {
-                return 0
-            }
-
-            let fm = FileManager.default
-            var size = 0
-
-            do {
-                let files = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.fileSizeKey])
-                size = files.reduce(0, { (totalSize, url) -> Int in
-                    let attributes = (try? fm.attributesOfItem(atPath: url.path)) ?? [:]
-                    let fileSize = (attributes[.size] as? NSNumber)?.intValue ?? 0
-                    return totalSize + fileSize
-                })
-            } catch {
-                CacheLog.error("\(error)")
-            }
-
-            return size
+        guard let url = self.url else {
+            return 0
         }
+
+        let fm = FileManager.default
+        var size = 0
+
+        do {
+            let files = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.fileSizeKey])
+            size = files.reduce(0, { (totalSize, url) -> Int in
+                let attributes = (try? fm.attributesOfItem(atPath: url.path)) ?? [:]
+                let fileSize = (attributes[.size] as? NSNumber)?.intValue ?? 0
+                return totalSize + fileSize
+            })
+        } catch {
+            CacheLog.error("\(error)")
+        }
+
+        return size
     }
 
     private let jsonDecoder: JSONDecoder = {
@@ -138,8 +130,6 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
             return nil
         }
 
-        self.queue = DispatchQueue(label: "\(name).queue", attributes: .concurrent)
-
         // Ensure URL path exists or can be created
         guard let _ = self.url else {
             CacheLog.error("Unable to access \(_url.absoluteString)")
@@ -156,99 +146,87 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
     }
 
     public var allKeys: AnySequence<Key> {
-        return queue.sync {
-            return AnySequence(storageKeyMap.keys)
-        }
+        return AnySequence(storageKeyMap.keys)
     }
 
     public var allAttributes: AnySequence<(Key, CacheItemAttributes)> {
-        return queue.sync {
-            return AnySequence(storageKeyMap.map { ($0.key, $0.value.attributes) })
-        }
+        return AnySequence(storageKeyMap.map { ($0.key, $0.value.attributes) })
     }
 
     public func value(forKey key: Key) -> Value? {
-        return queue.sync {
-            guard let data = self.data(for: key) else {
-                CacheLog.verbose("No data found for key '\(key)'")
+        let maybeData = self.data(for: key)
+
+        guard let data = maybeData else {
+            CacheLog.verbose("No data found for key '\(key)'")
+            return nil
+        }
+
+        if Value.self == Data.self {
+            CacheLog.verbose("Found data for key '\(key)'")
+            return data as? Value
+        }
+
+        do {
+            let wrapper = try jsonDecoder.decode([Value].self, from: data)
+            if let wrappedValue = wrapper.first {
+                CacheLog.verbose("Found wrapped value for key '\(key)'")
+                return wrappedValue
+            } else {
+                CacheLog.error("Wrapped value missing")
                 return nil
             }
-
-            if Value.self == Data.self {
-                CacheLog.verbose("Found data for key '\(key)'")
-                return data as? Value
-            }
-
-            do {
-                let wrapper = try jsonDecoder.decode([Value].self, from: data)
-                if let wrappedValue = wrapper.first {
-                    CacheLog.verbose("Found wrapped value for key '\(key)'")
-                    return wrappedValue
-                } else {
-                    CacheLog.error("Wrapped value missing")
-                    return nil
-                }
-            } catch {
-                CacheLog.error(error)
-                return nil
-            }
+        } catch {
+            CacheLog.error(error)
+            return nil
         }
     }
 
     public func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?) {
-        queue.sync(flags: .barrier) {
-            guard let value = value else {
-                CacheLog.verbose("Removing value for key '\(key)'")
-                removeFile(for: key)
+        guard let value = value else {
+            CacheLog.verbose("Removing value for key '\(key)'")
+            removeFile(for: key)
+            return
+        }
+
+        let data: Data
+        if let alreadyData = value as? Data {
+            data = alreadyData
+        } else {
+            // JSONEncoder and PropertyListEncoder do not currently support top-level fragments
+            // which means values like a plain Int cannot be encoded, so wrap all non-data
+            // values in an array.
+            do {
+                data = try jsonEncoder.encode([value])
+            } catch {
+                CacheLog.error(error)
                 return
             }
-
-            let data: Data
-            if let alreadyData = value as? Data {
-                data = alreadyData
-            } else {
-                // JSONEncoder and PropertyListEncoder do not currently support top-level fragments
-                // which means values like a plain Int cannot be encoded, so wrap all non-data
-                // values in an array.
-                do {
-                    data = try jsonEncoder.encode([value])
-                } catch {
-                    CacheLog.error(error)
-                    return
-                }
-            }
-            let attributes = attributes ?? CacheItemAttributes()
-            CacheLog.verbose("Setting value for key '\(key)' with attributes: \(attributes)")
-            addFile(for: key, data: data, attributes: attributes)
         }
+        let attributes = attributes ?? CacheItemAttributes()
+        CacheLog.verbose("Setting value for key '\(key)' with attributes: \(attributes)")
+        addFile(for: key, data: data, attributes: attributes)
     }
 
     public func attributes(forKey key: Key) -> CacheItemAttributes? {
-        return queue.sync {
-            return storageKeyMap[key]?.attributes
-        }
+        return storageKeyMap[key]?.attributes
     }
 
     public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) {
-        queue.sync(flags: .barrier) {
-            storageKeyMap[key]?.attributes = attributes
-            saveDBAfterInterval()
-        }
+        storageKeyMap[key]?.attributes = attributes
+        saveDBAfterInterval()
     }
 
     public func removeAll() {
-        queue.sync(flags: .barrier) {
-            storageKeyMap.removeAll()
-            saveDB()
-            guard let cacheURL = self.url else {
-                return
-            }
-            do {
-                try FileManager.default.removeItem(at: cacheURL)
-            }
-            catch let error {
-                CacheLog.error(error.localizedDescription)
-            }
+        storageKeyMap.removeAll()
+        saveDB()
+        guard let cacheURL = self.url else {
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: cacheURL)
+        }
+        catch let error {
+            CacheLog.error(error.localizedDescription)
         }
     }
 
@@ -271,17 +249,6 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
             let item = storageKeyMap[key],
             let fileURL = fileURL(forItem: item)
         else {
-            return nil
-        }
-
-        if item.attributes.shouldBeRemoved {
-            queue.async(flags: .barrier) {
-                // Check for item update while removal was scheduled
-                guard let item = self.storageKeyMap[key], item.attributes.shouldBeRemoved else {
-                    return
-                }
-                self.removeFile(for: key)
-            }
             return nil
         }
 
@@ -400,7 +367,7 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
     private func saveDBAfterInterval(_ interval: TimeInterval = 2.0) {
         let triggerDate = Date()
         lastDBSaveTriggeredDate = triggerDate
-        queue.asyncAfter(deadline: .now() + interval, flags: .barrier) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             let latestDate = self.lastDBSaveDate.addingTimeInterval(self.maxDBSaveInterval)
             let now = Date()
             if now >= latestDate || self.lastDBSaveTriggeredDate == triggerDate {

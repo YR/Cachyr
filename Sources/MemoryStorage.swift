@@ -33,8 +33,6 @@ public final class MemoryStorage<Key: Hashable, Value>: CacheStorage {
 
     private var items: [Key: Item] = [:]
 
-    private let queue = DispatchQueue(label: "MemoryStorage.queue", attributes: .concurrent)
-
     private let memoryPressureSource: DispatchSourceMemoryPressure
 
     public init() {
@@ -48,73 +46,47 @@ public final class MemoryStorage<Key: Hashable, Value>: CacheStorage {
     // MARK: - CacheStorage
 
     public var allKeys: AnySequence<Key> {
-        return queue.sync {
-            return AnySequence(items.keys)
-        }
+        return AnySequence(items.keys)
     }
 
     public var allAttributes: AnySequence<(Key, CacheItemAttributes)> {
-        return queue.sync {
-            return AnySequence(items.map { ($0.key, $0.value.attributes) })
-        }
+        return AnySequence(items.map { ($0.key, $0.value.attributes) })
     }
 
     public func value(forKey key: Key) -> Value? {
-        return queue.sync {
-            guard let item = self.items[key] else {
-                CacheLog.verbose("Value not found for '\(key)'")
-                return nil
-            }
-
-            if item.attributes.shouldBeRemoved {
-                queue.async(flags: .barrier) {
-                    // Check if item attributes have been updated while removal was scheduled
-                    guard let item = self.items[key], item.attributes.shouldBeRemoved else {
-                        return
-                    }
-                    CacheLog.verbose("Removing expired value for '\(key)'")
-                    self.items[key] = nil
-                }
-                return nil
-            }
-
+        if let item = items[key] {
             CacheLog.verbose("Value found for '\(key)'")
             return item.value
         }
+
+        CacheLog.verbose("Value not found for '\(key)'")
+        return nil
     }
 
     public func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?) {
-        queue.sync(flags: .barrier) {
-            guard let value = value else {
-                CacheLog.verbose("Removing value for '\(key)'")
-                items[key] = nil
-                return
-            }
-
-            let finalAttributes = attributes ?? CacheItemAttributes()
-            CacheLog.verbose("Setting value for '\(key)' with attributes: \(finalAttributes)")
-            items[key] = Item(attributes: finalAttributes, value: value)
+        guard let value = value else {
+            CacheLog.verbose("Removing value for '\(key)'")
+            items[key] = nil
+            return
         }
+
+        let finalAttributes = attributes ?? CacheItemAttributes()
+        CacheLog.verbose("Setting value for '\(key)' with attributes: \(finalAttributes)")
+        items[key] = Item(attributes: finalAttributes, value: value)
     }
 
     public func attributes(forKey key: Key) -> CacheItemAttributes? {
-        return queue.sync {
-            return items[key]?.attributes
-        }
+        return items[key]?.attributes
     }
 
     public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) {
-        queue.sync(flags: .barrier) {
-            guard self.items[key] != nil else {
-                return
-            }
-            self.items[key]!.attributes = attributes
+        guard self.items[key] != nil else {
+            return
         }
+        self.items[key]!.attributes = attributes
     }
 
     public func removeAll() {
-        queue.sync(flags: .barrier) {
-            items.removeAll()
-        }
+        items.removeAll()
     }
 }

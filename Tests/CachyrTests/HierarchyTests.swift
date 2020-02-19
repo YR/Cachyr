@@ -32,8 +32,6 @@ class HierarchyTests: XCTestCase {
         let title: String
     }
 
-    let expectationWaitTime: TimeInterval = 5
-
     let dataCache = Cache(storage: FileSystemStorage<Int, Data>()!)
 
     let memoryCache = Cache(storage: MemoryStorage<String, Book>())
@@ -57,20 +55,15 @@ class HierarchyTests: XCTestCase {
             reverse: { try? JSONDecoder().decode(Book.self, from: $0) })
 
         memoryCache.setCache(dataCache, as: .parent, keyTransformer: keyTransformer, valueTransformer: valueTransformer)
-        let valueExpectation = expectation(description: "Transformed value from parent in cache")
 
         let dataKey = 42
         let memoryKey = "42"
         let book = Book(identifier: dataKey, title: "foo")
         let bookData = try! JSONEncoder().encode(book)
 
-        dataCache.setValue(bookData, forKey: dataKey) {
-            self.memoryCache.value(forKey: memoryKey) { (value) in
-                XCTAssertEqual(book, value)
-                valueExpectation.fulfill()
-            }
-        }
-        waitForExpectations(timeout: expectationWaitTime)
+        dataCache.setValue(bookData, forKey: dataKey)
+        let value = memoryCache.value(forKey: memoryKey)
+        XCTAssertEqual(book, value)
     }
 
 }

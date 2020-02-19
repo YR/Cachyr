@@ -24,7 +24,7 @@
 
 import Foundation
 
-public protocol CacheSyncAPI {
+public protocol CacheAPI {
     associatedtype Key
     associatedtype Value
 
@@ -87,7 +87,7 @@ public protocol CacheSyncAPI {
     func remove(where predicate: @escaping (CacheItemAttributes) -> Bool)
 }
 
-public extension CacheSyncAPI {
+public extension CacheAPI {
     /**
      Synchronous convenience function to remove a value.
      It is the same as calling `setValue(_:forKey:attributes:)` with nil for value and attributes.
@@ -98,86 +98,3 @@ public extension CacheSyncAPI {
         setValue(nil, forKey: key, attributes: nil)
     }
 }
-
-public protocol CacheAsyncAPI {
-    associatedtype Key
-    associatedtype Value
-
-    /**
-     Asynchronously check if cache contains a value for key.
-
-     - Parameters:
-        - key: Unique key identifying value.
-        - completion: Closure with true if cache contains value, false otherwise.
-     */
-    func contains(key: Key, completion: @escaping (Bool) -> Void)
-
-    /**
-     Asynchronously fetch value from cache.
-
-     - Parameters:
-        - key: Unique key identifying value.
-        - completion: Closure with value if found in cache, nil otherwise.
-     */
-    func value(forKey key: Key, completion: @escaping (Value?) -> Void)
-
-    /**
-     Asynchronously set value for key.
-
-     - Parameters:
-        - value: Value to store. Set to nil to remove value.
-        - key: Unique key identifying value.
-        - attributes: Optional attributes for value. Set to nil when removing value.
-        - completion: Closure called when value has been set or removed.
-     */
-    func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?, completion: @escaping () -> Void)
-
-    /**
-     Asynchronously get item attributes for key.
-
-     - Parameters:
-        - key: Unique key identifying value.
-        - completion: Closure with item attributes if found, nil otherwise.
-     */
-    func attributes(forKey key: Key, completion: @escaping (CacheItemAttributes?) -> Void)
-
-    /**
-     Asynchronously set attributes for value identified by key.
-
-     - Parameters:
-        - attributes: New item attributes to set for value identified by key.
-        - key: Unique key identifying value.
-        - completion: Closure called when attributes have been set.
-     */
-    func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key, completion: @escaping () -> Void)
-
-    /**
-     Asynchronously remove all values.
-     */
-    func removeAll(_ completion: @escaping () -> Void)
-
-    /**
-     Asynchronously remove values conditionally.
-
-     - Parameters:
-        - predicate: Closure with item attributes as input that returns true if item is to be removed.
-        - completion: Closure called after removal is done.
-     */
-    func remove(where predicate: @escaping (CacheItemAttributes) -> Bool, completion: @escaping () -> Void)
-}
-
-public extension CacheAsyncAPI {
-    /**
-     Asynchronous convenience function to remove a value.
-     It is the same as calling `setValue(_:forKey:attributes:completion:)` with nil for value and attributes.
-
-     - Parameters:
-        - key: Unique key identifying value.
-        - completion: Closure called after removal is done.
-     */
-    func removeValue(forKey key: Key, completion: @escaping () -> Void) {
-        setValue(nil, forKey: key, attributes: nil, completion: completion)
-    }
-}
-
-public typealias CacheAPI = CacheSyncAPI & CacheAsyncAPI

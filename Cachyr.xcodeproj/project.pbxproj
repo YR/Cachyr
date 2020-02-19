@@ -30,6 +30,13 @@
 		8E712152230D797C00A2B900 /* HierarchyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E712151230D797C00A2B900 /* HierarchyTests.swift */; };
 		8E712153230D797C00A2B900 /* HierarchyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E712151230D797C00A2B900 /* HierarchyTests.swift */; };
 		8E712154230D797C00A2B900 /* HierarchyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E712151230D797C00A2B900 /* HierarchyTests.swift */; };
+		8E7897A723FC73BD00010953 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897A623FC73BD00010953 /* ReadWriteLock.swift */; };
+		8E7897A823FC73BD00010953 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897A623FC73BD00010953 /* ReadWriteLock.swift */; };
+		8E7897A923FC73BD00010953 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897A623FC73BD00010953 /* ReadWriteLock.swift */; };
+		8E7897AA23FC73BD00010953 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897A623FC73BD00010953 /* ReadWriteLock.swift */; };
+		8E7897AC23FDB57600010953 /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897AB23FDB57600010953 /* PerformanceTests.swift */; };
+		8E7897AD23FDB57600010953 /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897AB23FDB57600010953 /* PerformanceTests.swift */; };
+		8E7897AE23FDB57600010953 /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7897AB23FDB57600010953 /* PerformanceTests.swift */; };
 		8E9B31551DF957FE0007B377 /* CacheLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9B314B1DF957FE0007B377 /* CacheLog.swift */; };
 		8E9B31561DF957FE0007B377 /* CacheLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9B314B1DF957FE0007B377 /* CacheLog.swift */; };
 		8E9B31571DF957FE0007B377 /* CacheLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9B314B1DF957FE0007B377 /* CacheLog.swift */; };
@@ -96,6 +103,12 @@
 		8E71214823084A6F00A2B900 /* Transformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transformer.swift; sourceTree = "<group>"; };
 		8E71214D230D740500A2B900 /* FileSystemStorageTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = FileSystemStorageTests.swift; path = Tests/CachyrTests/FileSystemStorageTests.swift; sourceTree = "<group>"; };
 		8E712151230D797C00A2B900 /* HierarchyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HierarchyTests.swift; path = Tests/CachyrTests/HierarchyTests.swift; sourceTree = "<group>"; };
+		8E7897A623FC73BD00010953 /* ReadWriteLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadWriteLock.swift; sourceTree = "<group>"; };
+		8E7897AB23FDB57600010953 /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PerformanceTests.swift; path = Tests/CachyrTests/PerformanceTests.swift; sourceTree = "<group>"; };
+		8E8555FA23FF096A00114AFD /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		8E8555FB23FF096A00114AFD /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		8E8555FC23FF0A1000114AFD /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = SOURCE_ROOT; };
+		8E8555FD23FF0A1000114AFD /* Cachyr.podspec */ = {isa = PBXFileReference; lastKnownFileType = file; path = Cachyr.podspec; sourceTree = SOURCE_ROOT; };
 		8E9B314B1DF957FE0007B377 /* CacheLog.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CacheLog.swift; sourceTree = "<group>"; };
 		8E9B316F1DF9582B0007B377 /* MemoryAndDiskTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = MemoryAndDiskTests.swift; path = Tests/CachyrTests/MemoryAndDiskTests.swift; sourceTree = "<group>"; };
 		8E9B31711DF9582B0007B377 /* MemoryStorageTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; name = MemoryStorageTests.swift; path = Tests/CachyrTests/MemoryStorageTests.swift; sourceTree = "<group>"; };
@@ -169,6 +182,7 @@
 			isa = PBXGroup;
 			children = (
 				52D6D99C1BEFF38C002C0205 /* Configs */,
+				8E8555F923FF092F00114AFD /* Docs */,
 				52D6D97D1BEFF229002C0205 /* Products */,
 				8E9B31491DF957FE0007B377 /* Sources */,
 				8E9B316D1DF958090007B377 /* Tests */,
@@ -192,10 +206,21 @@
 		52D6D99C1BEFF38C002C0205 /* Configs */ = {
 			isa = PBXGroup;
 			children = (
+				8E8555FD23FF0A1000114AFD /* Cachyr.podspec */,
 				DD7502721C68FC1B006590AF /* Frameworks */,
+				8E8555FC23FF0A1000114AFD /* Package.swift */,
 				DD7502731C68FC20006590AF /* Tests */,
 			);
 			path = Configs;
+			sourceTree = "<group>";
+		};
+		8E8555F923FF092F00114AFD /* Docs */ = {
+			isa = PBXGroup;
+			children = (
+				8E8555FA23FF096A00114AFD /* LICENSE */,
+				8E8555FB23FF096A00114AFD /* README.md */,
+			);
+			name = Docs;
 			sourceTree = "<group>";
 		};
 		8E9B31491DF957FE0007B377 /* Sources */ = {
@@ -209,6 +234,7 @@
 				8E20F50223C37E78009E5F09 /* CacheWrapper.swift */,
 				8E07A91022F47E3C00E6AA51 /* FileSystemStorage.swift */,
 				8EF3F10A22F061A100DBF946 /* MemoryStorage.swift */,
+				8E7897A623FC73BD00010953 /* ReadWriteLock.swift */,
 				8E71214823084A6F00A2B900 /* Transformer.swift */,
 			);
 			path = Sources;
@@ -221,6 +247,7 @@
 				8E712151230D797C00A2B900 /* HierarchyTests.swift */,
 				8E9B316F1DF9582B0007B377 /* MemoryAndDiskTests.swift */,
 				8E9B31711DF9582B0007B377 /* MemoryStorageTests.swift */,
+				8E7897AB23FDB57600010953 /* PerformanceTests.swift */,
 			);
 			name = Tests;
 			sourceTree = "<group>";
@@ -530,6 +557,7 @@
 				8EB7265E22E4741000110AE6 /* Cache.swift in Sources */,
 				8E20F50323C37E78009E5F09 /* CacheWrapper.swift in Sources */,
 				8EF3F10B22F061A100DBF946 /* MemoryStorage.swift in Sources */,
+				8E7897A723FC73BD00010953 /* ReadWriteLock.swift in Sources */,
 				8E71214923084A6F00A2B900 /* Transformer.swift in Sources */,
 				8EB7266322E47A9900110AE6 /* CacheStorage.swift in Sources */,
 				8E07A91B22F629B800E6AA51 /* CacheAPI.swift in Sources */,
@@ -545,6 +573,7 @@
 				8E9B31751DF9582B0007B377 /* MemoryAndDiskTests.swift in Sources */,
 				8E712152230D797C00A2B900 /* HierarchyTests.swift in Sources */,
 				8E71214E230D740500A2B900 /* FileSystemStorageTests.swift in Sources */,
+				8E7897AC23FDB57600010953 /* PerformanceTests.swift in Sources */,
 				8E9B317B1DF9582B0007B377 /* MemoryStorageTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -557,6 +586,7 @@
 				8EB7266022E4741000110AE6 /* Cache.swift in Sources */,
 				8E20F50523C37E78009E5F09 /* CacheWrapper.swift in Sources */,
 				8EF3F10D22F061A100DBF946 /* MemoryStorage.swift in Sources */,
+				8E7897A923FC73BD00010953 /* ReadWriteLock.swift in Sources */,
 				8E71214B23084A6F00A2B900 /* Transformer.swift in Sources */,
 				8EB7266522E47A9900110AE6 /* CacheStorage.swift in Sources */,
 				8E07A91D22F629B800E6AA51 /* CacheAPI.swift in Sources */,
@@ -573,6 +603,7 @@
 				8EB7266122E4741000110AE6 /* Cache.swift in Sources */,
 				8E20F50623C37E78009E5F09 /* CacheWrapper.swift in Sources */,
 				8EF3F10E22F061A100DBF946 /* MemoryStorage.swift in Sources */,
+				8E7897AA23FC73BD00010953 /* ReadWriteLock.swift in Sources */,
 				8E71214C23084A6F00A2B900 /* Transformer.swift in Sources */,
 				8EB7266622E47A9900110AE6 /* CacheStorage.swift in Sources */,
 				8E07A91E22F629B800E6AA51 /* CacheAPI.swift in Sources */,
@@ -589,6 +620,7 @@
 				8EB7265F22E4741000110AE6 /* Cache.swift in Sources */,
 				8E20F50423C37E78009E5F09 /* CacheWrapper.swift in Sources */,
 				8EF3F10C22F061A100DBF946 /* MemoryStorage.swift in Sources */,
+				8E7897A823FC73BD00010953 /* ReadWriteLock.swift in Sources */,
 				8E71214A23084A6F00A2B900 /* Transformer.swift in Sources */,
 				8EB7266422E47A9900110AE6 /* CacheStorage.swift in Sources */,
 				8E07A91C22F629B800E6AA51 /* CacheAPI.swift in Sources */,
@@ -604,6 +636,7 @@
 				8E9B31761DF9582B0007B377 /* MemoryAndDiskTests.swift in Sources */,
 				8E712153230D797C00A2B900 /* HierarchyTests.swift in Sources */,
 				8E71214F230D740500A2B900 /* FileSystemStorageTests.swift in Sources */,
+				8E7897AD23FDB57600010953 /* PerformanceTests.swift in Sources */,
 				8E9B317C1DF9582B0007B377 /* MemoryStorageTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -615,6 +648,7 @@
 				8E9B31771DF9582B0007B377 /* MemoryAndDiskTests.swift in Sources */,
 				8E712154230D797C00A2B900 /* HierarchyTests.swift in Sources */,
 				8E712150230D740500A2B900 /* FileSystemStorageTests.swift in Sources */,
+				8E7897AE23FDB57600010953 /* PerformanceTests.swift in Sources */,
 				8E9B317D1DF9582B0007B377 /* MemoryStorageTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

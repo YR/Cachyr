@@ -34,87 +34,82 @@ public enum CacheTarget {
  */
 public final class Cache<Storage: CacheStorage>: CacheAPI {
 
+    private let lock = ReadWriteLock()
+
     private var storage: Storage
 
-    /**
-     Queue used to synchronize access to the cache.
-     */
-    public var accessQueue: DispatchQueue
-
-    /**
-     All asynchronous completion closures are dispatched on this queue.
-     */
-    public var completionQueue: DispatchQueue
-
-    public init(
-        storage: Storage,
-        accessQueue: DispatchQueue? = nil,
-        completionQueue: DispatchQueue? = nil
-    ) {
+    public init(storage: Storage) {
         self.storage = storage
-        self.accessQueue = accessQueue ?? DispatchQueue(label: "no.nrk.cachyr.access", attributes: .concurrent)
-        self.completionQueue = completionQueue ?? DispatchQueue(label: "no.nrk.cachyr.completion", attributes: .concurrent)
     }
 
     public func contains(key: Storage.Key) -> Bool {
-        return accessQueue.sync {
-            return _contains(key: key)
+        lock.readLock()
+        var foundAttributes = storage.attributes(forKey: key)
+        lock.unlock()
+        if foundAttributes == nil, let parentCache = parentCacheWrapper {
+            foundAttributes = parentCache.attributes(forKey: key)
         }
-    }
-
-    public func contains(
-        key: Storage.Key,
-        completion: @escaping (Bool) -> Void
-    ) {
-        accessQueue.async {
-            let found = self._contains(key: key)
-            self.completionQueue.async {
-                completion(found)
-            }
+        if let attributes = foundAttributes {
+            return !attributes.shouldBeRemoved
         }
-    }
-
-    /**
-     Directly check if value identified by key exists in cache. Not thread-safe.
-     */
-    private func _contains(key: Storage.Key) -> Bool {
-        var exists = storage.attributes(forKey: key) != nil
-        if !exists, let parentCache = parentCacheWrapper {
-            exists = parentCache.contains(key: key)
-        }
-        return exists
+        return false
     }
 
     public func value(forKey key: Storage.Key) -> Storage.Value? {
-        return accessQueue.sync {
-            return _value(for: key)
-        }
-    }
+        lock.readLock()
+        var maybeValue = storage.value(forKey: key)
+        var maybeAttributes = storage.attributes(forKey: key)
+        lock.unlock()
 
-    public func value(
-        forKey key: Storage.Key,
-        completion: @escaping (Storage.Value?) -> Void
-    ) {
-        accessQueue.async {
-            let value = self._value(for: key)
-            self.completionQueue.async {
-                completion(value)
+        if maybeValue == nil, let parentCache = parentCacheWrapper {
+            CacheLog.verbose("Looking for '\(key)' in parent")
+            maybeAttributes = parentCache.attributes(forKey: key)
+            maybeValue = parentCache.value(forKey: key)
+            if maybeValue != nil, let attributes = maybeAttributes {
+                // Got value and attributes from parent
+                if attributes.shouldBeRemoved {
+                    // But it's scheduled for removal
+                    CacheLog.verbose("Found '\(key)' in parent but item is scheduled for removal")
+                    maybeAttributes = nil
+                    maybeValue = nil
+                } else {
+                    // Update storage with value from parent but not if it has been updated
+                    // in the meantime
+                    lock.writeLock()
+                    let updatedAttributes = storage.attributes(forKey: key)
+                    if let attributes = updatedAttributes, !attributes.shouldBeRemoved {
+                        CacheLog.verbose("Found '\(key)' in parent but item has been updated in local storage")
+                        maybeAttributes = updatedAttributes
+                        maybeValue = storage.value(forKey: key)
+                    } else {
+                        CacheLog.verbose("Found '\(key)' in parent, updating local storage")
+                        storage.setValue(maybeValue, forKey: key, attributes: maybeAttributes)
+                    }
+                    lock.unlock()
+                }
+            } else {
+                // Fetching value and attributes from parent isn't atomic
+                // so nil both if one is missing
+                CacheLog.verbose("Value for '\(key)' not found in parent")
+                maybeAttributes = nil
+                maybeValue = nil
             }
         }
-    }
 
-    /**
-     Common synchronous fetch value function. Not thread-safe.
-     */
-    private func _value(for key: Storage.Key) -> Storage.Value? {
-        var value = storage.value(forKey: key)
-        if value == nil, let parentCache = parentCacheWrapper {
-            value = parentCache.value(forKey: key)
-            if value != nil, let attributes = parentCache.attributes(forKey: key) {
-                _setValue(value, for: key, attributes: attributes)
+        if let attributes = maybeAttributes, attributes.shouldBeRemoved {
+            lock.writeLock()
+            // Check if value was updated after read unlock
+            maybeAttributes = storage.attributes(forKey: key)
+            maybeValue = nil
+            if let attributes = maybeAttributes, !attributes.shouldBeRemoved {
+                maybeValue = storage.value(forKey: key)
+            } else {
+                storage.setValue(nil, forKey: key)
             }
+            lock.unlock()
         }
-        return value
+
+        return maybeValue
     }
 
     public func setValue(
@@ -122,56 +117,15 @@ public final class Cache<Storage: CacheStorage>: CacheAPI {
         forKey key: Storage.Key,
         attributes: CacheItemAttributes? = nil
     ) {
-        accessQueue.sync(flags: .barrier) {
-            _setValue(value, for: key, attributes: attributes)
-        }
-    }
-
-    public func setValue(
-        _ value: Storage.Value?,
-        forKey key: Storage.Key,
-        attributes: CacheItemAttributes? = nil,
-        completion: @escaping () -> Void
-    ) {
-        accessQueue.async(flags: .barrier) {
-            self._setValue(value, for: key, attributes: attributes)
-            self.completionQueue.async {
-                completion()
-            }
-        }
-    }
-
-    /**
-     Common value setter. Not thread-safe.
-     */
-    private func _setValue(
-        _ value: Storage.Value?,
-        for key: Storage.Key,
-        attributes: CacheItemAttributes?
-    ) {
+        lock.writeLock()
         storage.setValue(value, forKey: key, attributes: attributes)
+        lock.unlock()
     }
 
     public func attributes(forKey key: Storage.Key) -> CacheItemAttributes? {
-        return accessQueue.sync {
-            return _attributes(for: key)
-        }
-    }
-
-    public func attributes(
-        forKey key: Storage.Key,
-        completion: @escaping (CacheItemAttributes?) -> Void
-    ) {
-        accessQueue.async {
-            let attributes = self._attributes(for: key)
-            self.completionQueue.async {
-                completion(attributes)
-            }
-        }
-    }
-
-    private func _attributes(for key: Storage.Key) -> CacheItemAttributes? {
+        lock.readLock()
         var attributes = storage.attributes(forKey: key)
+        lock.unlock()
         if attributes == nil, let parentCache = parentCacheWrapper {
             attributes = parentCache.attributes(forKey: key)
         }
@@ -182,79 +136,24 @@ public final class Cache<Storage: CacheStorage>: CacheAPI {
         _ attributes: CacheItemAttributes,
         forKey key: Storage.Key
     ) {
-        accessQueue.sync {
-            _setAttributes(attributes, for: key)
-        }
-    }
-
-    public func setAttributes(
-        _ attributes: CacheItemAttributes,
-        forKey key: Storage.Key,
-        completion: @escaping () -> Void
-    ) {
-        accessQueue.async {
-            self._setAttributes(attributes, for: key)
-            self.completionQueue.async {
-                completion()
-            }
-        }
-    }
-
-    private func _setAttributes(
-        _ attributes: CacheItemAttributes,
-        for key: Storage.Key
-    ) {
+        lock.writeLock()
         storage.setAttributes(attributes, forKey: key)
+        lock.unlock()
     }
 
     public func removeAll() {
-        accessQueue.sync(flags: .barrier) {
-            _removeAll()
-        }
-    }
-
-    public func removeAll(_ completion: @escaping () -> Void) {
-        accessQueue.async(flags: .barrier) {
-            self._removeAll()
-            self.completionQueue.async {
-                completion()
-            }
-        }
-    }
-
-    /**
-     Private common remove all function. Not thread-safe.
-     */
-    private func _removeAll() {
+        lock.writeLock()
         storage.removeAll()
+        lock.unlock()
     }
 
     public func remove(where predicate: @escaping (CacheItemAttributes) -> Bool) {
-        accessQueue.sync(flags: .barrier) {
-            _remove(where: predicate)
-        }
-    }
-
-    public func remove(
-        where predicate: @escaping (CacheItemAttributes) -> Bool,
-        completion: @escaping () -> Void
-    ) {
-        accessQueue.async(flags: .barrier) {
-            self._remove(where: predicate)
-            self.completionQueue.async {
-                completion()
-            }
-        }
-    }
-
-    /**
-     Private common function that removes values where predicate is true. Not thread-safe.
-     */
-    private func _remove(where predicate: @escaping (CacheItemAttributes) -> Bool) {
+        lock.writeLock()
         for (key, attributes) in storage.allAttributes {
             guard predicate(attributes) else { continue }
             storage.removeValue(forKey: key)
         }
+        lock.unlock()
     }
 
     // MARK: - Cache linking

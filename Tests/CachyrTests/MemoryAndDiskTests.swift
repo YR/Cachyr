@@ -35,8 +35,6 @@ class MemoryAndDiskTests: XCTestCase {
 
     let memoryCache = Cache(storage: MemoryStorage<String, String>())
 
-    let expectationWaitTime: TimeInterval = 5
-
     override func setUp() {
         super.setUp()
 
@@ -50,66 +48,21 @@ class MemoryAndDiskTests: XCTestCase {
         memoryCache.removeAll()
     }
 
-    func testAsyncStringValue() {
-        let valueExpectation = expectation(description: "String value in cache")
-        let foo = "bar"
-        diskCache.setValue(foo, forKey: "foo") {
-            self.memoryCache.value(forKey: "foo") {
-                (value) in
-                XCTAssertEqual(foo, value)
-                valueExpectation.fulfill()
-            }
-        }
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncStringValue() {
+    func testStringValue() {
         let foo = "bar"
         diskCache.setValue(foo, forKey: "foo")
         let value = memoryCache.value(forKey: "foo")
         XCTAssertEqual(foo, value)
     }
 
-    func testAsyncContains() {
-        let expect = expectation(description: "Cache contains key")
-        let key = "foo"
-        memoryCache.contains(key: key) { (found) in
-            XCTAssertFalse(found)
-            self.diskCache.setValue(key, forKey: key)
-            self.memoryCache.contains(key: key, completion: { (found) in
-                XCTAssertTrue(found)
-                expect.fulfill()
-            })
-        }
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncContains() {
+    func testContains() {
         let key = "foo"
         XCTAssertFalse(memoryCache.contains(key: key))
         diskCache.setValue(key, forKey: key)
         XCTAssertTrue(memoryCache.contains(key: key))
     }
 
-    func testAsyncRemove() {
-        let expect = expectation(description: "Remove value in cache")
-        let foo = "foo"
-        diskCache.setValue(foo, forKey: foo) {
-            self.memoryCache.value(forKey: foo) { (value) in
-                XCTAssertNotNil(value)
-                self.diskCache.removeValue(forKey: foo)
-                self.memoryCache.removeValue(forKey: foo) {
-                    self.memoryCache.value(forKey: foo) { (value) in
-                        XCTAssertNil(value)
-                        expect.fulfill()
-                    }
-                }
-            }
-        }
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncRemove() {
+    func testRemove() {
         let foo = "foo"
         diskCache.setValue(foo, forKey: foo)
         var value = memoryCache.value(forKey: foo)
@@ -120,30 +73,7 @@ class MemoryAndDiskTests: XCTestCase {
         XCTAssertNil(value)
     }
 
-    func testAsyncRemoveAll() {
-        let valueExpectation = expectation(description: "Remove all in cache")
-        let foo = "foo"
-        let bar = "bar"
-
-        diskCache.setValue(foo, forKey: foo)
-        diskCache.setValue(bar, forKey: bar) {
-            XCTAssertEqual(self.memoryCache.value(forKey: foo), foo)
-            XCTAssertEqual(self.memoryCache.value(forKey: bar), bar)
-            self.memoryCache.removeAll()
-            self.diskCache.removeAll() {
-                self.memoryCache.value(forKey: foo) { (value) in
-                    XCTAssertNil(value)
-                    self.memoryCache.value(forKey: bar) { (value) in
-                        XCTAssertNil(value)
-                        valueExpectation.fulfill()
-                    }
-                }
-            }
-        }
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncRemoveAll() {
+    func testRemoveAll() {
         let foo = "foo"
         let bar = "bar"
 
@@ -159,28 +89,7 @@ class MemoryAndDiskTests: XCTestCase {
         XCTAssertNil(value)
     }
 
-    func testAsyncRemoveExpired() {
-        let valueExpectation = expectation(description: "Remove expired in cache")
-        let foo = "foo"
-        let bar = "bar"
-        let barExpireDate = Date(timeIntervalSinceNow: -30)
-        let attributes = CacheItemAttributes(expiration: barExpireDate, removal: nil)
-
-        diskCache.setValue(foo, forKey: foo)
-        diskCache.setValue(bar, forKey: bar, attributes: attributes)
-        diskCache.remove(where: { $0.hasExpired }) {
-            self.memoryCache.value(forKey: foo) { (value) in
-                XCTAssertNotNil(value)
-                self.memoryCache.value(forKey: bar) { (value) in
-                    XCTAssertNil(value)
-                    valueExpectation.fulfill()
-                }
-            }
-        }
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncRemoveExpired() {
+    func testRemoveExpired() {
         let foo = "foo"
         let bar = "bar"
         let barExpireDate = Date(timeIntervalSinceNow: -30)
@@ -195,30 +104,7 @@ class MemoryAndDiskTests: XCTestCase {
         XCTAssertNil(value)
     }
 
-    func testAsyncSetGetExpiration() {
-        let expect = expectation(description: "Async get/set expiration")
-        let fullExpiration = Date().addingTimeInterval(10)
-        // No second fractions in expire date stored in extended attribute
-        let expires = Date(timeIntervalSince1970: fullExpiration.timeIntervalSince1970.rounded())
-
-        let foo = "foo"
-        diskCache.setValue(foo, forKey: foo)
-        memoryCache.attributes(forKey: foo) { (attributes) in
-            XCTAssertNil(attributes?.expirationDate)
-            let attributes = CacheItemAttributes(expiration: expires, removal: nil)
-            self.diskCache.setAttributes(attributes, forKey: foo) {
-                self.memoryCache.attributes(forKey: foo) { (attributes) in
-                    XCTAssertNotNil(attributes?.expirationDate)
-                    XCTAssertEqual(expires, attributes!.expirationDate!)
-                    expect.fulfill()
-                }
-            }
-        }
-
-        waitForExpectations(timeout: expectationWaitTime)
-    }
-
-    func testSyncSetGetExpiration() {
+    func testSetGetExpiration() {
         let fullExpiration = Date().addingTimeInterval(10)
         // No second fractions in expire date stored in extended attribute
         let expires = Date(timeIntervalSince1970: fullExpiration.timeIntervalSince1970.rounded())
@@ -231,39 +117,6 @@ class MemoryAndDiskTests: XCTestCase {
         let expire = memoryCache.attributes(forKey: foo)?.expirationDate
         XCTAssertNotNil(expire)
         XCTAssertEqual(expires, expire!)
-    }
-
-    func testCompletionBackgroundQueue() {
-        let expect = expectation(description: "Background queue completion")
-        let currentThread = Thread.current
-        let cache = Cache(
-            storage: MemoryStorage<String, String>(),
-            completionQueue: DispatchQueue(label: "backgroundTest", qos: .background)
-        )
-        cache.setValue("asdf", forKey: "foo")
-        cache.value(forKey: "foo") { (_) in
-            XCTAssertNotEqual(currentThread, Thread.current)
-            expect.fulfill()
-        }
-        waitForExpectations(timeout: expectationWaitTime) { error in
-            cache.removeAll()
-        }
-    }
-
-    func testCompletionMainQueue() {
-        let expect = expectation(description: "Main queue completion")
-        let cache = Cache(
-            storage: MemoryStorage<String, String>(),
-            completionQueue: .main
-        )
-        cache.setValue("asdf", forKey: "foo")
-        cache.value(forKey: "foo") { (_) in
-            XCTAssertEqual(Thread.main, Thread.current)
-            expect.fulfill()
-        }
-        waitForExpectations(timeout: expectationWaitTime) { error in
-            cache.removeAll()
-        }
     }
 
     func testDiskAndMemoryExpiration() {

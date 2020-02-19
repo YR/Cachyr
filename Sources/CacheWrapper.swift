@@ -36,34 +36,12 @@ public final class CacheWrapper<Cache: CacheAPI>: CacheAPI {
             return otherCache.contains(key: otherKey)
         }
 
-        self.containsForKeyAsync = { key, completion in
-            guard let otherKey = keyTransformer.transform(key) else {
-                completion(false)
-                return
-            }
-            otherCache.contains(key: otherKey, completion: completion)
-        }
-
         self.valueForKey = { key in
             guard let otherKey = keyTransformer.transform(key) else { return nil }
             if let otherValue = otherCache.value(forKey: otherKey) {
                 return valueTransformer.reverseTransform(otherValue)
             } else {
                 return nil
-            }
-        }
-
-        self.valueForKeyAsync = { key, completion in
-            guard let otherKey = keyTransformer.transform(key) else {
-                completion(nil)
-                return
-            }
-            otherCache.value(forKey: otherKey) { (otherValue) in
-                if let otherValue = otherValue {
-                    completion(valueTransformer.reverseTransform(otherValue))
-                } else {
-                    completion(nil)
-                }
             }
         }
 
@@ -76,31 +54,9 @@ public final class CacheWrapper<Cache: CacheAPI>: CacheAPI {
             }
         }
 
-        self.setValueForKeyAsync = { value, key, attributes, completion in
-            guard let otherKey = keyTransformer.transform(key) else {
-                completion()
-                return
-            }
-            if value == nil {
-                otherCache.setValue(nil, forKey: otherKey, attributes: attributes, completion: completion)
-            } else if let value = value, let otherValue = valueTransformer.transform(value) {
-                otherCache.setValue(otherValue, forKey: otherKey, attributes: attributes, completion: completion)
-            } else {
-                completion()
-            }
-        }
-
         self.attributesForKey = { key in
             guard let otherKey = keyTransformer.transform(key) else { return nil }
             return otherCache.attributes(forKey: otherKey)
-        }
-
-        self.attributesForKeyAsync = { key, completion in
-            guard let otherKey = keyTransformer.transform(key) else {
-                completion(nil)
-                return
-            }
-            otherCache.attributes(forKey: otherKey, completion: completion)
         }
 
         self.setAttributesForKey = { attributes, key in
@@ -108,32 +64,16 @@ public final class CacheWrapper<Cache: CacheAPI>: CacheAPI {
             otherCache.setAttributes(attributes, forKey: otherKey)
         }
 
-        self.setAttributesForKeyAsync = { attributes, key, completion in
-            guard let otherKey = keyTransformer.transform(key) else {
-                completion()
-                return
-            }
-            otherCache.setAttributes(attributes, forKey: otherKey, completion: completion)
-        }
-
         self.removeAllInOther = {
             otherCache.removeAll()
-        }
-
-        self.removeAllInOtherAsync = { completion in
-            otherCache.removeAll(completion)
         }
 
         self.removeWhere = { predicate in
             otherCache.remove(where: predicate)
         }
-
-        self.removeWhereAsync = { predicate, completion in
-            otherCache.remove(where: predicate, completion: completion)
-        }
     }
 
-    // MARK: - CacheSyncAPI
+    // MARK: - CacheAPI
 
     private let containsForKey: (Cache.Key) -> Bool
 
@@ -175,50 +115,6 @@ public final class CacheWrapper<Cache: CacheAPI>: CacheAPI {
 
     public func remove(where predicate: @escaping (CacheItemAttributes) -> Bool) {
         removeWhere(predicate)
-    }
-
-    // MARK: - CacheAsyncAPI
-
-    private let containsForKeyAsync: (Cache.Key, @escaping (Bool) -> Void) -> Void
-
-    public func contains(key: Cache.Key, completion: @escaping (Bool) -> Void) {
-        containsForKeyAsync(key, completion)
-    }
-
-    private let valueForKeyAsync: (Cache.Key, @escaping (Cache.Value?) -> Void) -> Void
-
-    public func value(forKey key: Cache.Key, completion: @escaping (Cache.Value?) -> Void) {
-        valueForKeyAsync(key, completion)
-    }
-
-    private let setValueForKeyAsync: (Cache.Value?, Cache.Key, CacheItemAttributes?, @escaping () -> Void) -> Void
-
-    public func setValue(_ value: Cache.Value?, forKey key: Cache.Key, attributes: CacheItemAttributes?, completion: @escaping () -> Void) {
-        setValueForKeyAsync(value, key, attributes, completion)
-    }
-
-    private let attributesForKeyAsync: (Cache.Key, @escaping (CacheItemAttributes?) -> Void) -> Void
-
-    public func attributes(forKey key: Cache.Key, completion: @escaping (CacheItemAttributes?) -> Void) {
-        attributesForKeyAsync(key, completion)
-    }
-
-    private let setAttributesForKeyAsync: (CacheItemAttributes, Cache.Key, @escaping () -> Void) -> Void
-
-    public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Cache.Key, completion: @escaping () -> Void) {
-        setAttributesForKeyAsync(attributes, key, completion)
-    }
-
-    private let removeAllInOtherAsync: (@escaping () -> Void) -> Void
-
-    public func removeAll(_ completion: @escaping () -> Void) {
-        removeAllInOtherAsync(completion)
-    }
-
-    private let removeWhereAsync: (@escaping (CacheItemAttributes) -> Bool, @escaping () -> Void) -> Void
-
-    public func remove(where predicate: @escaping (CacheItemAttributes) -> Bool, completion: @escaping () -> Void) {
-        removeWhereAsync(predicate, completion)
     }
 
 }

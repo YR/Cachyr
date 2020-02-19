@@ -45,18 +45,13 @@ let key = "foo"
 let text = "bar"
 cache.setValue(text, forKey: key)
 let cachedText = cache.value(forKey: key)
-
-// Or asynchronously
-let cachedText = cache.value(forKey: key) { (value) in
-    // Do something with value
-}
 ```
 
 All caches are backed by some kind of storage. Storage for memory and the file system are included. Implement the `CacheStorage` protocol to provide custom storage.
 
 ### Linking Caches
 
-Caches can be linked to provide cache layers. There is no automatic propagation of changes between caches with one exception; querying a cache for a value or attributes for a value will query the parent if not found (and their parent etc.), and the cache will be updated with the value from the parent if the parent can provide it. The keys and values do not have to be the same for the linked caches, you can provide transforms for both.
+Caches can be linked to provide cache layers. There is no automatic propagation of changes between caches with one exception; querying a cache for a value or attributes for a value will query the parent if not found (and their parent etc.), and the cache will be updated with the value from the parent if the parent can provide it. The keys and values do not have to be the same for the linked caches as you can provide transforms for both.
 
 Here is an example of a filesystem cache with a memory cache in front, where the keys and values are the same type:
 
