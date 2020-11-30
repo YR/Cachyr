@@ -24,7 +24,7 @@
 
 import Foundation
 
-public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: CacheStorage {
+open class FileSystemCache<Key: Hashable & Codable, Value: Codable>: CacheAPI {
 
     private struct FileAttributes: Codable {
         let name: String
@@ -51,13 +51,7 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
      URL of cache directory, of the form: `baseURL/name`
      */
     public var url: URL? {
-        do {
-            try FileManager.default.createDirectory(at: _url, withIntermediateDirectories: true, attributes: nil)
-        } catch {
-            CacheLog.error("Unable to create \(_url.path):\n\(error)")
-            return nil
-        }
-        return _url
+        return try? createCacheDirectory()
     }
 
     /**
@@ -84,7 +78,7 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
                 return totalSize + fileSize
             })
         } catch {
-            CacheLog.error("\(error)")
+            return 0
         }
 
         return size
@@ -92,17 +86,25 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
 
     private let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: "inf",
+            negativeInfinity: "-inf",
+            nan: "nan"
+        )
         return decoder
     }()
 
     private let jsonEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "inf", negativeInfinity: "-inf", nan: "nan")
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "inf",
+            negativeInfinity: "-inf",
+            nan: "nan"
+        )
         return encoder
     }()
 
-    public init?(name: String = "no.nrk.cachyr.FileSystemStorage", baseURL: URL? = nil) {
+    public init(name: String = "no.nrk.cachyr.FileSystemStorage", baseURL: URL? = nil) throws {
         self.name = name
 
         let fm = FileManager.default
@@ -110,84 +112,56 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
         if let baseURL = baseURL {
             _url = baseURL.appendingPathComponent(name, isDirectory: true)
         } else {
-            do {
-                let cachesURL = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                _url = cachesURL.appendingPathComponent(name, isDirectory: true)
-            } catch {
-                CacheLog.error(error)
-                return nil
-            }
+            let cachesURL = try fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            _url = cachesURL.appendingPathComponent(name, isDirectory: true)
         }
 
-        do {
-            let appSupportName = "no.nrk.cachyr"
-            let appSupportURL = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let appURL = appSupportURL.appendingPathComponent(appSupportName, isDirectory: true)
-            try fm.createDirectory(at: appURL, withIntermediateDirectories: true)
-            dbFileURL = appURL.appendingPathComponent("\(name).json", isDirectory: false)
-        } catch {
-            CacheLog.error(error)
-            return nil
-        }
+        let appSupportName = "no.nrk.cachyr"
+        let appSupportURL = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let appURL = appSupportURL.appendingPathComponent(appSupportName, isDirectory: true)
+        try fm.createDirectory(at: appURL, withIntermediateDirectories: true)
+        dbFileURL = appURL.appendingPathComponent("\(name).json", isDirectory: false)
 
         // Ensure URL path exists or can be created
-        guard let _ = self.url else {
-            CacheLog.error("Unable to access \(_url.absoluteString)")
-            return nil
-        }
-
-        CacheLog.info("Using storage at \(_url.absoluteString)")
-        CacheLog.info("Using DB at \(dbFileURL.absoluteString)")
-        loadStorageKeyMap()
+        _ = try createCacheDirectory()
+        try loadStorageKeyMap()
     }
 
     deinit {
-        saveDB()
+        try? saveDB()
     }
 
-    public var allKeys: AnySequence<Key> {
-        return AnySequence(storageKeyMap.keys)
+    // MARK: - CacheAPI
+
+    public func contains(key: Key) -> Bool {
+        guard let attribs = storageKeyMap[key]?.attributes else {
+            return false
+        }
+        return !attribs.hasExpired
     }
 
-    public var allAttributes: AnySequence<(Key, CacheItemAttributes)> {
-        return AnySequence(storageKeyMap.map { ($0.key, $0.value.attributes) })
-    }
-
-    public func value(forKey key: Key) -> Value? {
-        let maybeData = self.data(for: key)
-
-        guard let data = maybeData else {
-            CacheLog.verbose("No data found for key '\(key)'")
+    public func value(forKey key: Key) throws -> Value? {
+        guard
+            let attribs = try attributes(forKey: key),
+            !attribs.hasExpired,
+            let data = self.data(for: key)
+        else {
             return nil
         }
 
         if Value.self == Data.self {
-            CacheLog.verbose("Found data for key '\(key)'")
             return data as? Value
         }
 
-        do {
-            let wrapper = try jsonDecoder.decode([Value].self, from: data)
-            if let wrappedValue = wrapper.first {
-                CacheLog.verbose("Found wrapped value for key '\(key)'")
-                return wrappedValue
-            } else {
-                CacheLog.error("Wrapped value missing")
-                return nil
-            }
-        } catch {
-            CacheLog.error(error)
-            return nil
-        }
+        let wrapper = try jsonDecoder.decode([Value].self, from: data)
+        return wrapper.first
     }
 
-    public func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?) {
-        guard let value = value else {
-            CacheLog.verbose("Removing value for key '\(key)'")
-            removeFile(for: key)
-            return
-        }
-
+    public func setValue(
+        _ value: Value,
+        forKey key: Key,
+        attributes: CacheItemAttributes? = nil
+    ) throws {
         let data: Data
         if let alreadyData = value as? Data {
             data = alreadyData
@@ -195,39 +169,49 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
             // JSONEncoder and PropertyListEncoder do not currently support top-level fragments
             // which means values like a plain Int cannot be encoded, so wrap all non-data
             // values in an array.
-            do {
-                data = try jsonEncoder.encode([value])
-            } catch {
-                CacheLog.error(error)
-                return
-            }
+            data = try jsonEncoder.encode([value])
         }
         let attributes = attributes ?? CacheItemAttributes()
-        CacheLog.verbose("Setting value for key '\(key)' with attributes: \(attributes)")
-        addFile(for: key, data: data, attributes: attributes)
+        try addFile(for: key, data: data, attributes: attributes)
     }
 
-    public func attributes(forKey key: Key) -> CacheItemAttributes? {
-        return storageKeyMap[key]?.attributes
+    public func removeValue(forKey key: Key) throws {
+        try removeFile(for: key)
     }
 
-    public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) {
+    public func removeAll() throws {
+        storageKeyMap.removeAll()
+        try saveDB()
+        guard let cacheURL = self.url else {
+            return
+        }
+        try FileManager.default.removeItem(at: cacheURL)
+    }
+
+    public func remove(where predicate: @escaping (CacheItemAttributes) -> Bool) throws {
+        for (key, fileAttributes) in storageKeyMap {
+            guard predicate(fileAttributes.attributes) else { continue }
+            try removeFile(for: key)
+        }
+    }
+
+    public func attributes(forKey key: Key) throws -> CacheItemAttributes? {
+        guard let attribs = storageKeyMap[key]?.attributes else {
+            return nil
+        }
+        return attribs.hasExpired ? nil : attribs
+    }
+
+    public func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) throws {
         storageKeyMap[key]?.attributes = attributes
         saveDBAfterInterval()
     }
 
-    public func removeAll() {
-        storageKeyMap.removeAll()
-        saveDB()
-        guard let cacheURL = self.url else {
-            return
-        }
-        do {
-            try FileManager.default.removeItem(at: cacheURL)
-        }
-        catch let error {
-            CacheLog.error(error.localizedDescription)
-        }
+    // MARK: - Private
+
+    private func createCacheDirectory() throws -> URL {
+        try FileManager.default.createDirectory(at: _url, withIntermediateDirectories: true, attributes: nil)
+        return _url
     }
 
     private func fileURL(forItem item: FileAttributes) -> URL? {
@@ -255,22 +239,21 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
         return FileManager.default.contents(atPath: fileURL.path)
     }
 
-    private func filesInCache(properties: [URLResourceKey]? = [.nameKey]) -> [URL] {
+    private func filesInCache(properties: [URLResourceKey]? = [.nameKey]) throws -> [URL] {
         guard let url = self.url else {
             return []
         }
 
-        do {
-            let fm = FileManager.default
-            let files = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: properties, options: [.skipsHiddenFiles])
-            return files
-        } catch {
-            CacheLog.error("\(error)")
-            return []
-        }
+        let fm = FileManager.default
+        let files = try fm.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: properties,
+            options: [.skipsHiddenFiles]
+        )
+        return files
     }
 
-    private func addFile(for key: Key, data: Data, attributes: CacheItemAttributes) {
+    private func addFile(for key: Key, data: Data, attributes: CacheItemAttributes) throws {
         let cacheItem: FileAttributes
 
         if let existingItem = storageKeyMap[key] {
@@ -287,77 +270,59 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
             let fileURL = self.fileURL(forItem: cacheItem),
             fm.createFile(atPath: fileURL.path, contents: data, attributes: nil)
         else {
-            CacheLog.error("Unable to create file for \(key)")
-            removeFile(for: key)
+            try removeFile(for: key)
             return
         }
 
         saveDBAfterInterval()
     }
 
-    private func removeFile(for key: Key) {
+    private func removeFile(for key: Key) throws {
         if let fileURL = fileURL(forKey: key) {
-            removeFile(at: fileURL)
+            try removeFile(at: fileURL)
         }
         storageKeyMap[key] = nil
         saveDBAfterInterval()
     }
 
-    private func removeFile(at url: URL) {
-        do {
-            try FileManager.default.removeItem(at: url)
-        }
-        catch let error {
-            CacheLog.error(error.localizedDescription)
-        }
+    private func removeFile(at url: URL) throws {
+        try FileManager.default.removeItem(at: url)
     }
 
     /**
      Reset storage key map and load all keys from files in cache.
      */
-    private func loadStorageKeyMap() {
-        loadDB()
+    private func loadStorageKeyMap() throws {
+        try loadDB()
 
         validateDB()
 
-        saveDB()
+        try saveDB()
     }
 
-    private func loadDB() {
+    private func loadDB() throws {
         let fm = FileManager.default
         guard let data = fm.contents(atPath: dbFileURL.path) else {
             return
         }
         let decoder = JSONDecoder()
-        do {
-            storageKeyMap = try decoder.decode([Key: FileAttributes].self, from: data)
-        } catch {
-            CacheLog.error(error)
-            return
-        }
-        CacheLog.info("DB loaded")
+        storageKeyMap = try decoder.decode([Key: FileAttributes].self, from: data)
     }
 
     private var lastDBSaveDate = Date(timeIntervalSince1970: 0)
 
-    private func saveDB() {
+    private func saveDB() throws {
         let fm = FileManager.default
         let encoder = JSONEncoder()
 
-        do {
-            let data = try encoder.encode(storageKeyMap)
-            if fm.createFile(atPath: dbFileURL.path, contents: data, attributes: nil) {
-                lastDBSaveDate = Date()
-            }
-
-            var resourceValues = URLResourceValues()
-            resourceValues.isExcludedFromBackup = true
-            try dbFileURL.setResourceValues(resourceValues)
-            CacheLog.verbose("DB saved")
-        } catch {
-            CacheLog.error(error)
-            return
+        let data = try encoder.encode(storageKeyMap)
+        if fm.createFile(atPath: dbFileURL.path, contents: data, attributes: nil) {
+            lastDBSaveDate = Date()
         }
+
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        try dbFileURL.setResourceValues(resourceValues)
     }
 
     private var lastDBSaveTriggeredDate = Date(timeIntervalSince1970: 0)
@@ -371,7 +336,7 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
             let latestDate = self.lastDBSaveDate.addingTimeInterval(self.maxDBSaveInterval)
             let now = Date()
             if now >= latestDate || self.lastDBSaveTriggeredDate == triggerDate {
-                self.saveDB()
+                try? self.saveDB()
             }
         }
     }
@@ -386,23 +351,20 @@ public final class FileSystemStorage<Key: Hashable & Codable, Value: Codable>: C
                 let fileURL = fileURL(forItem: item),
                 fm.fileExists(atPath: fileURL.path)
             else {
-                CacheLog.info("No file found, removing '\(key)' from DB")
-                removeFile(for: key)
+                try? removeFile(for: key)
                 continue
             }
         }
 
         // Make sure each file has a corresponding item
         let items = storageKeyMap.values
-        for fileURL in filesInCache() {
+        let files = (try? filesInCache()) ?? []
+        for fileURL in files {
             let fileName = fileURL.lastPathComponent
             if items.contains(where: { $0.name == fileName }) {
                 continue
             }
-            CacheLog.info("No item found, removing \(fileURL.absoluteString)")
             try? fm.removeItem(at: fileURL)
         }
-
-        CacheLog.info("DB validated")
     }
 }

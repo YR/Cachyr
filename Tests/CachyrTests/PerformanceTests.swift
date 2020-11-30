@@ -35,50 +35,44 @@ class PerformanceTests: XCTestCase {
         super.tearDown()
     }
 
-    private func runPerformanceTest<Storage>(cache: Cache<Storage>, iterations: Int)
-        where Storage.Key == Int, Storage.Value == Int {
+    private func runPerformanceTest<Cache: CacheAPI>(cache: Cache, iterations: Int)
+        where Cache.Key == Int, Cache.Value == Int {
 
-        let queue = DispatchQueue(label: "testPerformance", attributes: .concurrent)
-        let threadCountSemaphore = DispatchSemaphore(value: 10)
+        let queue = DispatchQueue(label: "testPerformance")
         let doneSemaphore = DispatchSemaphore(value: 0)
         let numberRange = 1 ... 10
         var doneCount = 0
-        let doneCountLock = ReadWriteLock()
 
         for _ in 0 ..< iterations {
-            threadCountSemaphore.wait()
             queue.async {
                 let number = numberRange.randomElement()!
-                if let _ = cache.value(forKey: number) {
-                    cache.removeValue(forKey: number)
+                if let _ = try! cache.value(forKey: number) {
+                    try! cache.removeValue(forKey: number)
                 } else {
-                    cache.setValue(number, forKey: number)
+                    try! cache.setValue(number, forKey: number, attributes: nil)
                 }
-                threadCountSemaphore.signal()
-                doneCountLock.writeLock()
                 doneCount += 1
                 if doneCount == iterations {
                     doneSemaphore.signal()
                 }
-                doneCountLock.unlock()
             }
         }
         doneSemaphore.wait()
     }
 
-    func testDiskPerformance() {
-        let diskCache = Cache(storage: FileSystemStorage<Int, Int>()!)
+    func testDiskPerformance() throws {
+        let diskCache = try FileSystemCache<Int, Int>()
         measure {
             runPerformanceTest(cache: diskCache, iterations: 1_000)
-            diskCache.removeAll()
+            try! diskCache.removeAll()
         }
     }
 
-    func testMemoryPerformance() {
-        let memoryCache = Cache(storage: MemoryStorage<Int, Int>())
+    func testMemoryPerformance() throws {
+        let memoryCache = MemoryCache<Int, Int>()
         measure {
             runPerformanceTest(cache: memoryCache, iterations: 10_000)
-            memoryCache.removeAll()
+            try! memoryCache.removeAll()
         }
     }
 

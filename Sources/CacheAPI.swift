@@ -29,7 +29,7 @@ public protocol CacheAPI {
     associatedtype Value
 
     /**
-     Synchronously check if cache contains a value for key.
+     Check if cache contains a value for key.
 
      - Parameter key: Unique key identifying value.
 
@@ -38,63 +38,58 @@ public protocol CacheAPI {
     func contains(key: Key) -> Bool
 
     /**
-     Synchronously fetch value from cache.
+     Fetch value from cache.
 
      - Parameter key: Unique key identifying value.
 
      - Returns: Value if contained in cache, nil otherwise.
      */
-    func value(forKey key: Key) -> Value?
+    func value(forKey key: Key) throws -> Value?
 
     /**
-     Synchronously set value for key.
+     Set value for key.
 
      - Parameters:
-        - value: Value to store. Set to nil to remove value.
+        - value: Value to store.
         - key: Unique key identifying value.
-        - attributes: Optional attributes for value. Set to nil when removing value.
+        - attributes: Optional attributes for value.
      */
-    func setValue(_ value: Value?, forKey key: Key, attributes: CacheItemAttributes?)
+    func setValue(_ value: Value, forKey key: Key, attributes: CacheItemAttributes?) throws
 
     /**
-     Synchronously get item attributes for key.
+     Remove value for key.
+
+     - Parameter key: Unique key identifying value.
+     */
+    func removeValue(forKey key: Key) throws
+
+    /**
+     Remove all values.
+     */
+    func removeAll() throws
+
+    /**
+     Remove values conditionally.
+
+     - Parameter predicate: Closure with item attributes as input that returns true if item is to be removed.
+     */
+    func remove(where predicate: @escaping (CacheItemAttributes) -> Bool) throws
+
+    /**
+     Get item attributes for key.
 
      - Parameter key: Unique key identifying value.
 
      - Returns: Attributes describing cache item.
      */
-    func attributes(forKey key: Key) -> CacheItemAttributes?
+    func attributes(forKey key: Key) throws -> CacheItemAttributes?
 
     /**
-     Synchronously set attributes for value identified by key.
+     Set attributes for value identified by key.
 
      - Parameters:
         - attributes: New item attributes to set for value identified by key.
         - key: Unique key identifying value.
      */
-    func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key)
-
-    /**
-     Synchronously remove all values.
-     */
-    func removeAll()
-
-    /**
-     Synchronously remove values conditionally.
-
-     - Parameter predicate: Closure with item attributes as input that returns true if item is to be removed.
-     */
-    func remove(where predicate: @escaping (CacheItemAttributes) -> Bool)
-}
-
-public extension CacheAPI {
-    /**
-     Synchronous convenience function to remove a value.
-     It is the same as calling `setValue(_:forKey:attributes:)` with nil for value and attributes.
-
-     - Parameter key: Unique key identifying value.
-     */
-    func removeValue(forKey key: Key) {
-        setValue(nil, forKey: key, attributes: nil)
-    }
+    func setAttributes(_ attributes: CacheItemAttributes, forKey key: Key) throws
 }

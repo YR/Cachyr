@@ -25,113 +25,115 @@
 import XCTest
 @testable import Cachyr
 
-class MemoryAndDiskTests: XCTestCase {
+class CombinedCacheTests: XCTestCase {
 
     struct Book: Codable, Equatable {
         let title: String
     }
 
-    let diskCache = Cache(storage: FileSystemStorage<String, String>()!)
-
-    let memoryCache = Cache(storage: MemoryStorage<String, String>())
+    var cache: CombinedCache<MemoryCache<String, String>, FileSystemCache<String, String>>!
 
     override func setUp() {
         super.setUp()
 
-        diskCache.setCache(memoryCache, as: .child, keyTransformer: .identity(), valueTransformer: .identity())
+        cache = CombinedCache(
+            primary: MemoryCache<String, String>(),
+            secondary: try! FileSystemCache<String, String>(name: "test-memoryanddisk"),
+            keyTransform: { $0 },
+            primaryValueTransform: { $0 },
+            secondaryValueTransform: { $0 }
+        )
     }
 
     override func tearDown() {
         super.tearDown()
 
-        diskCache.removeAll()
-        memoryCache.removeAll()
+        try! cache.removeAll()
     }
 
-    func testStringValue() {
+    func testStringValue() throws {
         let foo = "bar"
-        diskCache.setValue(foo, forKey: "foo")
-        let value = memoryCache.value(forKey: "foo")
+
+        try cache.secondaryCache.setValue(foo, forKey: "foo")
+        let value = try cache.value(forKey: "foo")
         XCTAssertEqual(foo, value)
     }
 
-    func testContains() {
+    func testContains() throws {
         let key = "foo"
-        XCTAssertFalse(memoryCache.contains(key: key))
-        diskCache.setValue(key, forKey: key)
-        XCTAssertTrue(memoryCache.contains(key: key))
+        XCTAssertFalse(cache.contains(key: key))
+        try cache.secondaryCache.setValue(key, forKey: key)
+        XCTAssertTrue(cache.contains(key: key))
     }
 
-    func testRemove() {
+    func testRemove() throws {
         let foo = "foo"
-        diskCache.setValue(foo, forKey: foo)
-        var value = memoryCache.value(forKey: foo)
+        try cache.secondaryCache.setValue(foo, forKey: foo)
+        var value = try cache.value(forKey: foo)
         XCTAssertNotNil(value)
-        diskCache.removeValue(forKey: foo)
-        memoryCache.removeValue(forKey: foo)
-        value = memoryCache.value(forKey: foo)
+        try cache.removeValue(forKey: foo)
+        value = try cache.value(forKey: foo)
         XCTAssertNil(value)
     }
 
-    func testRemoveAll() {
+    func testRemoveAll() throws {
         let foo = "foo"
         let bar = "bar"
 
-        diskCache.setValue(foo, forKey: foo)
-        diskCache.setValue(bar, forKey: bar)
-        XCTAssertEqual(memoryCache.value(forKey: foo), foo)
-        XCTAssertEqual(memoryCache.value(forKey: bar), bar)
-        self.memoryCache.removeAll()
-        self.diskCache.removeAll()
-        var value = memoryCache.value(forKey: foo)
+        try cache.secondaryCache.setValue(foo, forKey: foo)
+        try cache.secondaryCache.setValue(bar, forKey: bar)
+        XCTAssertEqual(try cache.value(forKey: foo), foo)
+        XCTAssertEqual(try cache.value(forKey: bar), bar)
+        try cache.removeAll()
+        var value = try cache.secondaryCache.value(forKey: foo)
         XCTAssertNil(value)
-        value = memoryCache.value(forKey: bar)
+        value = try cache.primaryCache.value(forKey: bar)
         XCTAssertNil(value)
     }
 
-    func testRemoveExpired() {
+    func testRemoveExpired() throws {
         let foo = "foo"
         let bar = "bar"
         let barExpireDate = Date(timeIntervalSinceNow: -30)
         let barAttributes = CacheItemAttributes(expiration: barExpireDate, removal: nil)
 
-        diskCache.setValue(foo, forKey: foo)
-        diskCache.setValue(bar, forKey: bar, attributes: barAttributes)
-        diskCache.remove(where: { $0.hasExpired })
-        var value = memoryCache.value(forKey: foo)
+        try cache.secondaryCache.setValue(foo, forKey: foo)
+        try cache.secondaryCache.setValue(bar, forKey: bar, attributes: barAttributes)
+        try cache.secondaryCache.remove(where: { $0.hasExpired })
+        var value = try cache.value(forKey: foo)
         XCTAssertNotNil(value)
-        value = memoryCache.value(forKey: bar)
+        value = try cache.value(forKey: bar)
         XCTAssertNil(value)
     }
 
-    func testSetGetExpiration() {
+    func testSetGetExpiration() throws {
         let fullExpiration = Date().addingTimeInterval(10)
         // No second fractions in expire date stored in extended attribute
         let expires = Date(timeIntervalSince1970: fullExpiration.timeIntervalSince1970.rounded())
         let attributes = CacheItemAttributes(expiration: expires, removal: nil)
         let foo = "foo"
-        diskCache.setValue(foo, forKey: foo)
-        let noExpire = memoryCache.attributes(forKey: foo)?.expirationDate
+        try cache.secondaryCache.setValue(foo, forKey: foo)
+        let noExpire = try cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNil(noExpire)
-        diskCache.setAttributes(attributes, forKey: foo)
-        let expire = memoryCache.attributes(forKey: foo)?.expirationDate
+        try cache.secondaryCache.setAttributes(attributes, forKey: foo)
+        let expire = try cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNotNil(expire)
         XCTAssertEqual(expires, expire!)
     }
 
-    func testDiskAndMemoryExpiration() {
+    func testDiskAndMemoryExpiration() throws {
         let key = "foo"
         let value = "bar"
         let attributes = CacheItemAttributes(expiration: Date.distantFuture, removal: nil)
 
-        diskCache.setValue(value, forKey: key, attributes: attributes)
-        let diskExpires = diskCache.attributes(forKey: key)!.expirationDate
+        try cache.secondaryCache.setValue(value, forKey: key, attributes: attributes)
+        let diskExpires = try cache.secondaryCache.attributes(forKey: key)!.expirationDate
         XCTAssertEqual(diskExpires!, attributes.expirationDate!)
 
         // Populate memory cache by requesting value in data cache
-        let cacheValue = memoryCache.value(forKey: key)
+        let cacheValue = try cache.value(forKey: key)
         XCTAssertNotNil(cacheValue)
-        let memoryExpires = memoryCache.attributes(forKey: key)?.expirationDate
+        let memoryExpires = try cache.attributes(forKey: key)?.expirationDate
         XCTAssertNotNil(memoryExpires)
         XCTAssertEqual(memoryExpires!, attributes.expirationDate!)
     }

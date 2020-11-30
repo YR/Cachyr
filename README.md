@@ -2,9 +2,8 @@
 
 A typesafe key-value cache for iOS, iPadOS, macOS, tvOS and watchOS written in Swift.
 
-- Thread safe.
 - Link caches with different key and value types.
-- Generic storage. Use the provided filesystem and memory storage, or write your own.
+- Protocol based API. Create and combine caches as needed.
 - Clean, single-purpose implementation. Does caching and nothing else.
 
 ## Installation
@@ -40,18 +39,18 @@ Alternatively build the framework and add it to your project.
 ### Simple Memory Cache
 
 ```swift
-let cache = Cache(storage: MemoryStorage<String, String>())
+let cache = MemoryCache<String, String>()
 let key = "foo"
 let text = "bar"
-cache.setValue(text, forKey: key)
-let cachedText = cache.value(forKey: key)
+try cache.setValue(text, forKey: key)
+let cachedText = try cache.value(forKey: key)
 ```
 
-All caches are backed by some kind of storage. Storage for memory and the file system are included. Implement the `CacheStorage` protocol to provide custom storage.
+Different caches use different kinds of storage. Caches using memory and the file system are included. Implement the `CacheAPI` protocol in order to create your own cache.
 
 ### Linking Caches
 
-Caches can be linked to provide cache layers. There is no automatic propagation of changes between caches with one exception; querying a cache for a value or attributes for a value will query the parent if not found (and their parent etc.), and the cache will be updated with the value from the parent if the parent can provide it. The keys and values do not have to be the same for the linked caches as you can provide transforms for both.
+Caches can be linked to provide cache layers with the `CombinedCache`. This cache also implements the `CacheAPI` protocol and can be combined, linking as many layers as are needed. There is no automatic propagation of changes between primary and secondary caches with one exception; querying a primary cache for a value or attributes for a value will query the secondary cache if the value is not found, and the primary cache will be updated with the value from the secondary if it exists. The keys and values do not have to be the same for the linked caches since you provide transforms to make them compatible.
 
 Here is an example of a filesystem cache with a memory cache in front, where the keys and values are the same type:
 
@@ -60,15 +59,17 @@ struct Book: Codable {
     let title: String
 }
 
-guard let diskStorage = FileSystemStorage<String, Book>() else { return }
-let diskCache = Cache(storage: diskStorage)
-let memoryCache = Cache(storage: MemoryStorage<String, Book>())
-memoryCache.setCache(diskCache, as: .parent,
-    keyTransformer: .identity(), valueTransformer: .identity())
+let cache = CombinedCache(
+    primary: MemoryCache<String, Book>(),
+    secondary: try! FileSystemCache<String, Book>(),
+    keyTransform: { $0 },
+    primaryValueTransform: { $0 },
+    secondaryValueTransform: { $0 }
+)
 
 let book = Book(title: "Cachyr")
-diskCache.setValue(book, forKey: "cachyr")
-if let foundBook = memoryCache.value(forKey: "cachyr") {
+try cache.setValue(book, forKey: "cachyr")
+if let foundBook = try cache.value(forKey: "cachyr") {
 	// ...
 }
 ```
@@ -76,26 +77,19 @@ if let foundBook = memoryCache.value(forKey: "cachyr") {
 A more advanced example with key and value transforms:
 
 ```swift
-guard let dataStorage = FileSystemStorage<Int, Data>() else { return }
-let dataCache = Cache(storage: dataStorage)
-let memoryCache = Cache(storage: MemoryStorage<String, Book>())
-
-let keyTransformer = Transformer<String, Int>(
-    transform: { Int($0) },
-    reverse: { "\($0)" })
-
-let valueTransformer = Transformer<Book, Data>(
-    transform: { try? JSONEncoder().encode($0) },
-    reverse: { try? JSONDecoder().decode(Book.self, from: $0) })
-
-memoryCache.setCache(dataCache, as: .parent,
-    keyTransformer: keyTransformer, valueTransformer: valueTransformer)
+let cache = CombinedCache(
+    primary: MemoryCache<String, Book>(),
+    secondary: try FileSystemCache<Int, Data>(),
+    keyTransform: { Int($0) },
+    primaryValueTransform: { try! JSONEncoder().encode($0) },
+    secondaryValueTransform: { try! JSONDecoder().decode(Book.self, from: $0) }
+)
 
 let dataKey = 42
 let memoryKey = "42"
 let book = Book(title: "foo")
-let bookData = try! JSONEncoder().encode(book)
+let bookData = try JSONEncoder().encode(book)
 
-dataCache.setValue(bookData, forKey: dataKey)
-let fetchedBook = memoryCache.value(forKey: memoryKey)
+cache.secondaryCache.setValue(bookData, forKey: dataKey)
+let fetchedBook = try cache.value(forKey: memoryKey)
 ```
