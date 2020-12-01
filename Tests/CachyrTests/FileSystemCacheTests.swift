@@ -25,60 +25,59 @@
 import XCTest
 @testable import Cachyr
 
-class MemoryCacheTests: XCTestCase {
+class FileSystemCacheTests: XCTestCase {
+    var cache: FileSystemCache<String, String>!
+
     override func setUp() {
         super.setUp()
+
+        cache = try! FileSystemCache<String, String>(name: "test")
+        try! cache.removeAll()
     }
 
     override func tearDown() {
         super.tearDown()
+
+        try! cache.removeAll()
     }
 
-    func testIntValues() throws {
-        let cache = MemoryCache<String, Int>()
-        try cache.setValue(42, forKey: "Int")
-        let intValue = try cache.value(forKey: "Int")
-        XCTAssertEqual(42, intValue)
-    }
-
-    func testDoubleValues() throws {
-        let cache = MemoryCache<String, Double>()
-        try cache.setValue(42.0, forKey: "Double")
-        let doubleValue = try cache.value(forKey: "Double")
-        XCTAssertEqual(42.0, doubleValue)
-    }
-
-    func testStringValues() throws {
-        let cache = MemoryCache<String, String>()
-        try cache.setValue("Test", forKey: "String")
-        let stringValue = try cache.value(forKey: "String")
-        XCTAssertEqual("Test", stringValue)
-    }
-
-    func testStructValues() throws {
-        struct Foo {
-            let bar = "Bar"
+    func testCodable() throws {
+        struct Thing: Codable, Equatable {
+            let identifier: Int
+            let question: String
         }
 
-        let cache = MemoryCache<String, Foo>()
-        try cache.setValue(Foo(), forKey: "Foo")
-        let foo = try cache.value(forKey: "Foo")
-        XCTAssertEqual("Bar", foo?.bar)
+        let cache = try FileSystemCache<Int, Thing>(name: "test-codable")
+        defer { try! cache.removeAll() }
+
+        let key = 42
+        let thing = Thing(identifier: key, question: "foo")
+        try cache.setValue(thing, forKey: key)
+        let value = try cache.value(forKey: key)
+        XCTAssertNotNil(value)
+        XCTAssertEqual(thing, value)
     }
 
-    func testClassValues() throws {
-        class Foo {
-            let bar = "Bar"
-        }
+    func testDataValue() throws {
+        let cache = try FileSystemCache<String, Data>(name: "test-data")
+        defer { try! cache.removeAll() }
 
-        let cache = MemoryCache<String, Foo>()
-        try cache.setValue(Foo(), forKey: "Foo")
-        let foo = try cache.value(forKey: "Foo")
-        XCTAssertEqual("Bar", foo?.bar)
+        let foo = "bar".data(using: .utf8)!
+        try cache.setValue(foo, forKey: "foo")
+        let value = try cache.value(forKey: "foo")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(foo, value)
+    }
+
+    func testStringValue() throws {
+        let foo = "bar"
+        try cache.setValue(foo, forKey: "foo")
+        let value = try cache.value(forKey: "foo")
+        XCTAssertNotNil(value)
+        XCTAssertEqual(foo, value)
     }
 
     func testContains() throws {
-        let cache = MemoryCache<String, String>()
         let key = "foo"
         XCTAssertFalse(cache.contains(key: key))
         try cache.setValue(key, forKey: key)
@@ -86,36 +85,31 @@ class MemoryCacheTests: XCTestCase {
     }
 
     func testRemove() throws {
-        let cache = MemoryCache<String, String>()
         let key = "foo"
         try cache.setValue(key, forKey: key)
         var value = try cache.value(forKey: key)
-        XCTAssertEqual(value, key)
+        XCTAssertNotNil(value)
         try cache.removeValue(forKey: key)
         value = try cache.value(forKey: key)
         XCTAssertNil(value)
     }
 
     func testRemoveAll() throws {
-        let cache = MemoryCache<String, Int>()
-        let values = [1, 2, 3]
-        for i in values {
-            try cache.setValue(i, forKey: "\(i)")
-        }
-        for i in values {
-            let value = try cache.value(forKey: "\(i)")
-            XCTAssertEqual(value, i)
-        }
+        try cache.setValue("foo", forKey: "foo")
+        try cache.setValue("bar", forKey: "bar")
         try cache.removeAll()
-        for i in values {
-            let value = try cache.value(forKey: "\(i)")
-            XCTAssertNil(value)
-        }
+        let foo = try cache.value(forKey: "foo")
+        XCTAssertNil(foo)
+        let bar = try cache.value(forKey: "bar")
+        XCTAssertNil(bar)
     }
 
     func testExpiration() throws {
-        let cache = MemoryCache<String, String>()
         let foo = "foo"
+
+        try cache.setValue(foo, forKey: foo)
+        let expirationInFutureValue = try cache.value(forKey: foo)
+        XCTAssertNotNil(expirationInFutureValue)
 
         let hasNotExpiredDate = Date(timeIntervalSinceNow: 30)
         try cache.setValue(foo, forKey: foo, attributes: CacheItemAttributes(expiration: hasNotExpiredDate))
@@ -129,7 +123,6 @@ class MemoryCacheTests: XCTestCase {
     }
 
     func testRemoveExpired() throws {
-        let cache = MemoryCache<String, String>()
         let foo = "foo"
         let bar = "bar"
         let barExpireDate = Date(timeIntervalSinceNow: -30)
@@ -145,8 +138,9 @@ class MemoryCacheTests: XCTestCase {
     }
 
     func testSetGetExpiration() throws {
-        let cache = MemoryCache<String, String>()
-        let expires = Date().addingTimeInterval(10)
+        let fullExpiration = Date().addingTimeInterval(10)
+        // No second fractions in expire date stored in extended attribute
+        let expires = Date(timeIntervalSince1970: fullExpiration.timeIntervalSince1970.rounded())
         let foo = "foo"
         try cache.setValue(foo, forKey: foo)
         let noExpire = try cache.attributes(forKey: foo)?.expirationDate
@@ -158,7 +152,6 @@ class MemoryCacheTests: XCTestCase {
     }
 
     func testRemoveExpiration() throws {
-        let cache = MemoryCache<String, String>()
         let expiration = Date().addingTimeInterval(10)
         let foo = "foo"
         try cache.setValue(foo, forKey: foo)
@@ -167,67 +160,78 @@ class MemoryCacheTests: XCTestCase {
         try cache.setAttributes(CacheItemAttributes(expiration: expiration), forKey: foo)
         let expire = try cache.attributes(forKey: foo)?.expirationDate
         XCTAssertNotNil(expire)
-        try cache.setAttributes(CacheItemAttributes(expiration: nil), forKey: foo)
-        let expirationGone = try cache.attributes(forKey: foo)?.expirationDate
-        XCTAssertNil(expirationGone)
+        try cache.setAttributes(CacheItemAttributes(), forKey: foo)
+        let expirationGone = try cache.attributes(forKey: foo)
+        XCTAssertNotNil(expirationGone)
+        XCTAssertNil(expirationGone?.expirationDate)
     }
 
     func testInteger() throws {
-        let cacheInt = MemoryCache<String, Int>()
+        let cacheInt = try FileSystemCache<String, Int>(name: "test-int")
+        defer { try! cacheInt.removeAll() }
         let int = Int(Int.min)
         try cacheInt.setValue(int, forKey: "Int")
         let intValue = try cacheInt.value(forKey: "Int")
         XCTAssertEqual(intValue, int)
 
-        let cacheInt8 = MemoryCache<String, Int8>()
+        let cacheInt8 = try FileSystemCache<String, Int8>(name: "test-int8")
+        defer { try! cacheInt8.removeAll() }
         let int8 = Int8(Int8.min)
         try cacheInt8.setValue(int8, forKey: "Int8")
         let int8Value = try cacheInt8.value(forKey: "Int8")
         XCTAssertEqual(int8Value, int8)
 
-        let cacheInt16 = MemoryCache<String, Int16>()
+        let cacheInt16 = try FileSystemCache<String, Int16>(name: "test-int16")
+        defer { try! cacheInt16.removeAll() }
         let int16 = Int16(Int16.min)
         try cacheInt16.setValue(int16, forKey: "Int16")
         let int16Value = try cacheInt16.value(forKey: "Int16")
         XCTAssertEqual(int16Value, int16)
 
-        let cacheInt32 = MemoryCache<String, Int32>()
+        let cacheInt32 = try FileSystemCache<String, Int32>(name: "test-int32")
+        defer { try! cacheInt32.removeAll() }
         let int32 = Int32(Int32.min)
         try cacheInt32.setValue(int32, forKey: "Int32")
         let int32Value = try cacheInt32.value(forKey: "Int32")
         XCTAssertEqual(int32Value, int32)
 
-        let cacheInt64 = MemoryCache<String, Int64>()
+        let cacheInt64 = try FileSystemCache<String, Int64>(name: "test-int64")
+        defer { try! cacheInt64.removeAll() }
         let int64 = Int64(Int64.min)
         try cacheInt64.setValue(int64, forKey: "Int64")
         let int64Value = try cacheInt64.value(forKey: "Int64")
         XCTAssertEqual(int64Value, int64)
 
-        let cacheUInt = MemoryCache<String, UInt>()
+        let cacheUInt = try FileSystemCache<String, UInt>(name: "test-uint")
+        defer { try! cacheUInt.removeAll() }
         let uint = UInt(UInt.max)
         try cacheUInt.setValue(uint, forKey: "UInt")
         let uintValue = try cacheUInt.value(forKey: "UInt")
         XCTAssertEqual(uintValue, uint)
 
-        let cacheUInt8 = MemoryCache<String, UInt8>()
+        let cacheUInt8 = try FileSystemCache<String, UInt8>(name: "test-uint8")
+        defer { try! cacheUInt8.removeAll() }
         let uint8 = UInt8(UInt8.max)
         try cacheUInt8.setValue(uint8, forKey: "UInt8")
         let uint8Value = try cacheUInt8.value(forKey: "UInt8")
         XCTAssertEqual(uint8Value, uint8)
 
-        let cacheUInt16 = MemoryCache<String, UInt16>()
+        let cacheUInt16 = try FileSystemCache<String, UInt16>(name: "test-uint16")
+        defer { try! cacheUInt16.removeAll() }
         let uint16 = UInt16(UInt16.max)
         try cacheUInt16.setValue(uint16, forKey: "UInt16")
         let uint16Value = try cacheUInt16.value(forKey: "UInt16")
         XCTAssertEqual(uint16Value, uint16)
 
-        let cacheUInt32 = MemoryCache<String, UInt32>()
+        let cacheUInt32 = try FileSystemCache<String, UInt32>(name: "test-uint32")
+        defer { try! cacheUInt32.removeAll() }
         let uint32 = UInt32(UInt32.max)
         try cacheUInt32.setValue(uint32, forKey: "UInt32")
         let uint32Value = try cacheUInt32.value(forKey: "UInt32")
         XCTAssertEqual(uint32Value, uint32)
 
-        let cacheUInt64 = MemoryCache<String, UInt64>()
+        let cacheUInt64 = try FileSystemCache<String, UInt64>(name: "test-uint64")
+        defer { try! cacheUInt64.removeAll() }
         let uint64 = UInt64(UInt64.max)
         try cacheUInt64.setValue(uint64, forKey: "UInt64")
         let uint64Value = try cacheUInt64.value(forKey: "UInt64")
@@ -235,7 +239,8 @@ class MemoryCacheTests: XCTestCase {
     }
 
     func testFloatingPoint() throws {
-        let cacheFloat = MemoryCache<String, Float>()
+        let cacheFloat = try FileSystemCache<String, Float>(name: "test-float")
+        defer { try! cacheFloat.removeAll() }
 
         let float = Float(Float.pi)
         try cacheFloat.setValue(float, forKey: "Float")
@@ -257,7 +262,8 @@ class MemoryCacheTests: XCTestCase {
         let nanFloatValue = try cacheFloat.value(forKey: "nanFloat")
         XCTAssertEqual(nanFloatValue?.isNaN, nanFloat.isNaN)
 
-        let cacheDouble = MemoryCache<String, Double>()
+        let cacheDouble = try FileSystemCache<String, Double>(name: "test-double")
+        defer { try! cacheDouble.removeAll() }
 
         let double = Double(Double.pi)
         try cacheDouble.setValue(double, forKey: "Double")
