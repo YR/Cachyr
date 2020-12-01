@@ -25,6 +25,8 @@
 import Foundation
 
 open class MemoryCache<Key: Hashable, Value>: CacheAPI {
+
+    /// Indicate if cache should be cleared when a memory pressure notification is received.
     public var clearOnMemoryPressure: Bool {
         didSet {
             if clearOnMemoryPressure {

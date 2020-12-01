@@ -72,13 +72,15 @@ open class CombinedCache<PrimaryCache: CacheAPI, SecondaryCache: CacheAPI>: Cach
 
         // Not in primary cache, check secondary cache
         let secondaryKey = keyTransform(key)
-        guard let secondaryValue = try secondaryCache.value(forKey: secondaryKey) else {
+        guard
+            let attributes = try secondaryCache.attributes(forKey: secondaryKey),
+            let secondaryValue = try secondaryCache.value(forKey: secondaryKey)
+        else {
             return nil
         }
 
         // Found value in secondary cache, add it to primary cache and return it
         let value = secondaryValueTransform(secondaryValue)
-        let attributes = try secondaryCache.attributes(forKey: secondaryKey)
         try primaryCache.setValue(value, forKey: key, attributes: attributes)
 
         return value

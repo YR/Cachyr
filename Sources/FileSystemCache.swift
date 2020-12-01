@@ -104,7 +104,7 @@ open class FileSystemCache<Key: Hashable & Codable, Value: Codable>: CacheAPI {
         return encoder
     }()
 
-    public init(name: String = "no.nrk.cachyr.FileSystemStorage", baseURL: URL? = nil) throws {
+    public init(name: String = "no.nrk.cachyr.FileSystemCache", baseURL: URL? = nil) throws {
         self.name = name
 
         let fm = FileManager.default
@@ -289,9 +289,6 @@ open class FileSystemCache<Key: Hashable & Codable, Value: Codable>: CacheAPI {
         try FileManager.default.removeItem(at: url)
     }
 
-    /**
-     Reset storage key map and load all keys from files in cache.
-     */
     private func loadStorageKeyMap() throws {
         try loadDB()
 
